@@ -1,0 +1,110 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  cargo-check:
+    name: cargo check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --all-targets
+
+  cargo-fmt:
+    name: cargo fmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --check
+
+  cargo-clippy:
+    name: cargo clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: make clippy
+
+  cargo-test:
+    name: tests (nextest + coverage)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo install cargo-nextest --locked || true
+      - run: cargo install cargo-llvm-cov --locked || true
+      - run: make test
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-artifacts
+          path: |
+            target/nextest/ci/junit.xml
+            target/llvm-cov-target/cobertura.xml
+            target/html/
+
+  e2e:
+    name: e2e (quickstart)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: chmod +x ./scripts/quickstart.sh
+      - run: ./scripts/quickstart.sh
+
+  audit:
+    name: cargo audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo install cargo-audit --locked || true
+      - run: make audit
+
+  build:
+    name: build (release)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: echo "VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
+      - run: cargo build --release --locked
+      - run: mv target/release/certboy "certboy-${VERSION}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: certboy-${{ env.VERSION }}
+          path: certboy-${{ env.VERSION }}
+
+  build-musl:
+    name: build (x86_64-unknown-linux-musl)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - run: rustup target add x86_64-unknown-linux-musl
+      - run: echo "VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
+      - run: cargo build --release --locked --target x86_64-unknown-linux-musl
+      - run: mv target/x86_64-unknown-linux-musl/release/certboy "certboy-x86_64-unknown-linux-musl-${VERSION}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: certboy-x86_64-unknown-linux-musl-${{ env.VERSION }}
+          path: certboy-x86_64-unknown-linux-musl-${{ env.VERSION }}

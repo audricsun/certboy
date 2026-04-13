@@ -1,0 +1,46 @@
+# Rust build
+/target/
+**/*.rs.bk
+
+# Binaries
+*.exe
+*.dll
+*.so
+*.dylib
+*.rlib
+
+# Cargo
+# Cargo.lock is committed for reproducible builds
+
+# IDEs and editors
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+*.log
+
+# Test output
+/tests/output/
+
+# Goreleaser
+/dist/
+release.yml
+
+# Misc
+*.old
+*.bak 
+
+CAs/
+Certs/
+
+sandbox/
+
+
+coverage/
+cobertura-coverage.xml
+test_output.txt
+
+.cargo/
