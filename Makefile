@@ -39,10 +39,10 @@ coverage: test ## Alias for test
 all: build ## Build the project
 
 build: ## Build the project using cargo
-	cargo build
+	cargo build --release --locked
 
 release:
-	cargo build --release
+	cargo build --release --locked
 
 check: ## Check the project using cargo
 	cargo check
@@ -60,14 +60,16 @@ musl-setup:
 	rustup target add x86_64-unknown-linux-musl
 
 musl: musl-setup
-	cargo build --release --target x86_64-unknown-linux-musl
+	cargo build --release --locked --target x86_64-unknown-linux-musl
 
 install-musl: musl
 	install -Dm755 target/x86_64-unknown-linux-musl/release/certboy $(DESTDIR)$(BINDIR)/certboy
 
 check-deps:
 	@command -v bumpver >/dev/null 2>&1 || { echo >&2 "bumpver is not installed. Aborting."; exit 1; }
-	@command -v git-cliff >/dev/null 2>&1 || { echo >&2 "git-cliff is not installed. Aborting."; exit 1; }
+	@if [ "$(VERSION)" = "patch" ]; then \
+		command -v git-cliff >/dev/null 2>&1 || { echo >&2 "git-cliff is not installed. Aborting."; exit 1; }; \
+	fi
 
 VERSION ?= build
 CURRENT_VERSION := $(shell cat VERSION 2>/dev/null || echo "unknown")
@@ -85,21 +87,24 @@ else
   $(error Invalid VERSION '$(VERSION)'. Use patch|build)
 endif
 
-NEXT_VERSION := $(shell bumpver update --dry $(BUMP_ARGS) 2>&1 | grep "New Version:" | awk '{print $$NF}')
-
 bump: check-deps ## Bump version. Usage: make bump VERSION=patch|build (default: build)
-	@if [ -z "$(NEXT_VERSION)" ]; then \
+	@NEXT_VERSION="$$(bumpver update --dry $(BUMP_ARGS) 2>&1 | grep "New Version:" | awk '{print $$NF}')" ; \
+	if [ -z "$$NEXT_VERSION" ]; then \
 		echo "Error: Could not calculate next version. Check bumpver args."; \
 		exit 1; \
+	fi ; \
+	echo "Current version: $(CURRENT_VERSION)" ; \
+	echo "New version: v$$NEXT_VERSION" ; \
+	if [ "$(VERSION)" = "patch" ]; then \
+		git-cliff --tag "v$$NEXT_VERSION" -o CHANGELOG.md ; \
+		git add CHANGELOG.md Cargo.toml VERSION bumpver.toml ; \
+	fi ; \
+	bumpver update $(BUMP_ARGS) --allow-dirty --no-push ; \
+	cargo check ; \
+	if [ "$(VERSION)" = "patch" ]; then \
+		git add Cargo.lock ; \
+		git commit --amend --no-edit ; \
+		echo "Version bumped to v$$NEXT_VERSION and CHANGELOG.md updated." ; \
+	else \
+		echo "Version bumped to v$$NEXT_VERSION" ; \
 	fi
-	@echo "Current version: $(CURRENT_VERSION)"
-	@echo "New version: v$(NEXT_VERSION)"
-	@git-cliff --tag v$(NEXT_VERSION) -o CHANGELOG.md
-	@git add CHANGELOG.md Cargo.toml VERSION bumpver.toml
-	@bumpver update $(BUMP_ARGS) --allow-dirty --no-push
-	@cargo check
-	@git add Cargo.lock
-	@git commit --amend --no-edit
-	@git tag -a v$(NEXT_VERSION) -m "v$(NEXT_VERSION)"
-	@echo "Version bumped to v$(NEXT_VERSION) and CHANGELOG.md updated."
-	@echo "Don't forget to push: git push && git push --tags"
