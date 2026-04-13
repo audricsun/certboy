@@ -146,7 +146,7 @@ pub async fn sign_ica(
     builder.set_pubkey(&pkey)?;
     let not_before = Asn1Time::days_from_now(0)?;
     let days = expiration_days.unwrap_or(3650); // Default 10 years
-    let not_after = Asn1Time::days_from_now(days.into())?;
+    let not_after = Asn1Time::days_from_now(days)?;
     builder.set_not_before(&not_before)?;
     builder.set_not_after(&not_after)?;
 

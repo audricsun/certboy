@@ -2,6 +2,7 @@
 
 .PREFIX ?= /usr/local
 BINDIR ?= $(PREFIX)/bin
+AUDIT_DB_DIR ?= target/advisory-db
 
 .PHONY: all build check clean bump help check-deps test coverage clippy audit
 .PHONY: release install musl musl-setup install-musl changelog
@@ -22,8 +23,16 @@ clippy: ## Run clippy (same as CI)
 	cargo clippy --all-targets -- -D warnings
 
 audit: ## Run cargo-audit (dependency vulnerability scan)
-	@command -v cargo-audit >/dev/null 2>&1 || { echo >&2 "cargo-audit is not installed. Run: cargo install cargo-audit"; exit 1; }
-	cargo audit
+	@if ! command -v cargo-audit >/dev/null 2>&1; then \
+		echo "cargo-audit is not installed; installing..."; \
+		cargo install cargo-audit --locked; \
+	fi
+	@if [ -d "$(AUDIT_DB_DIR)/.git" ]; then \
+		git -C "$(AUDIT_DB_DIR)" pull --ff-only || echo "Warning: failed to update advisory db; using cached copy"; \
+	else \
+		git clone --depth 1 https://github.com/RustSec/advisory-db.git "$(AUDIT_DB_DIR)"; \
+	fi
+	cargo audit --db "$(AUDIT_DB_DIR)" --no-fetch
 
 coverage: test ## Alias for test
 

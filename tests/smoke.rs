@@ -713,7 +713,7 @@ async fn test_verify_fullchain_order_wrong_count() {
     fs::write(&fullchain_path, &single_cert).unwrap();
 
     // Verify should report wrong count
-    let result = utils::verify_fullchain_order(&fullchain_path.parent().unwrap());
+    let result = utils::verify_fullchain_order(fullchain_path.parent().unwrap());
     assert!(result.is_ok());
     let (is_valid, message) = result.unwrap();
     assert!(!is_valid);

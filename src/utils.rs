@@ -756,7 +756,7 @@ fn display_certificate_tree(
                 if let Some(parent) = &cert.parent {
                     icas_by_root
                         .entry(parent.clone())
-                        .or_insert_with(Vec::new)
+                        .or_default()
                         .push(cert.clone());
                 } else {
                     // Fallback to path-based detection
@@ -764,7 +764,7 @@ fn display_certificate_tree(
                     if let Some(root) = extract_parent_ca(&path_str) {
                         icas_by_root
                             .entry(root)
-                            .or_insert_with(Vec::new)
+                            .or_default()
                             .push(cert.clone());
                     } else {
                         root_cas.push(cert.clone());
@@ -776,7 +776,7 @@ fn display_certificate_tree(
                 if let Some(parent) = &cert.parent {
                     server_certs_by_ca
                         .entry(parent.clone())
-                        .or_insert_with(Vec::new)
+                        .or_default()
                         .push(cert.clone());
                 } else {
                     // Fallback to path-based detection
@@ -784,7 +784,7 @@ fn display_certificate_tree(
                     if let Some(ca) = extract_parent_ca(&path_str) {
                         server_certs_by_ca
                             .entry(ca)
-                            .or_insert_with(Vec::new)
+                            .or_default()
                             .push(cert.clone());
                     } else {
                         root_cas.push(cert.clone());
@@ -831,7 +831,7 @@ fn display_certificate_tree(
     for cert in certificates {
         serial_to_domains
             .entry(cert.serial.clone())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(cert.domain.clone());
     }
 
@@ -1221,8 +1221,8 @@ pub fn verify_fullchain_order(cert_dir: &Path) -> Result<(bool, String)> {
     let server_cert_subject = server_cert.subject_name();
     let server_cert_issuer = server_cert.issuer_name();
 
-    let _server_subject_cn = get_cn_from_name(&server_cert_subject);
-    let server_issuer_cn = get_cn_from_name(&server_cert_issuer);
+    let _server_subject_cn = get_cn_from_name(server_cert_subject);
+    let server_issuer_cn = get_cn_from_name(server_cert_issuer);
 
     // For ICA-signed certs, fullchain should have exactly 2 certificates:
     // 1. Server certificate (leaf)
@@ -1275,7 +1275,7 @@ fn extract_cn_from_pem(pem_section: &str) -> Option<String> {
     let pem = format!("-----BEGIN CERTIFICATE-----{}", pem_section);
     let cert = X509::from_pem(pem.as_bytes()).ok()?;
     let subject = cert.subject_name();
-    Some(get_cn_from_name(&subject))
+    Some(get_cn_from_name(subject))
 }
 
 pub fn fix_fullchain_order(cert_dir: &Path, _context: &Path) -> Result<()> {
@@ -1289,8 +1289,8 @@ pub fn fix_fullchain_order(cert_dir: &Path, _context: &Path) -> Result<()> {
     let cert_pem = fs::read(&crt_path)?;
 
     let cert = X509::from_pem(&cert_pem)?;
-    let issuer_cn = get_cn_from_name(&cert.issuer_name());
-    let subject_cn = get_cn_from_name(&cert.subject_name());
+    let issuer_cn = get_cn_from_name(cert.issuer_name());
+    let subject_cn = get_cn_from_name(cert.subject_name());
 
     // This is a Root CA-signed certificate (self-signed) - no fullchain needed
     if issuer_cn == subject_cn {
@@ -1735,7 +1735,7 @@ pub fn find_tls_certs_signed_by(context: &Path, ca_domain: &str) -> Result<Vec<C
             // Check if this cert is signed by the given CA
             if let Ok(pem) = fs::read(path) {
                 if let Ok(cert) = X509::from_pem(&pem) {
-                    let issuer = get_cn_from_name(&cert.issuer_name());
+                    let issuer = get_cn_from_name(cert.issuer_name());
                     if issuer == ca_domain {
                         let domain = path
                             .parent()
@@ -2000,7 +2000,7 @@ pub async fn revoke_certificate(context: &Path, domain: &str, skip_confirm: bool
             // Remove the entire root CA directory
             let root_dir = context.join(domain);
             if root_dir.exists() {
-                fs::remove_dir_all(&root_dir)?;
+                fs::remove_dir_all(root_dir)?;
                 println!("Removed Root CA: {}", domain);
             }
 
@@ -2054,7 +2054,7 @@ pub async fn revoke_certificate(context: &Path, domain: &str, skip_confirm: bool
             // Remove the ICA directory
             let ica_dir = cert_dir;
             if ica_dir.exists() {
-                fs::remove_dir_all(&ica_dir)?;
+                fs::remove_dir_all(ica_dir)?;
                 println!("Removed Intermediate CA: {}", domain);
             }
 
@@ -2093,7 +2093,7 @@ pub async fn revoke_certificate(context: &Path, domain: &str, skip_confirm: bool
             // Remove the TLS cert directory
             let tls_dir = cert_dir;
             if tls_dir.exists() {
-                fs::remove_dir_all(&tls_dir)?;
+                fs::remove_dir_all(tls_dir)?;
                 println!("Removed TLS certificate: {}", domain);
             }
 
@@ -2720,7 +2720,7 @@ pub async fn list_certificates(
         if !cert.serial.is_empty() && cert.serial != "unknown" {
             serial_to_domains
                 .entry(cert.serial.clone())
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(cert.domain.clone());
         }
     }
@@ -2856,7 +2856,7 @@ pub async fn list_certificates(
             }
 
             // Handle serial/renewal issues for TLS certs
-            if auto_fix && !cert_issues.is_empty() && cert.parent.is_some() {
+            if auto_fix && !cert_issues.is_empty() {
                 let issues_str = cert_issues
                     .iter()
                     .map(|s| s.red().to_string())
@@ -2865,7 +2865,14 @@ pub async fn list_certificates(
                 let prompt = format!("Re-sign '{}' ({})? [y/N]: ", cert.domain.blue(), issues_str);
 
                 if ask_confirm(&prompt, yes) {
-                    let parent = cert.parent.as_ref().unwrap();
+                    let Some(parent) = cert.parent.as_deref() else {
+                        fix_results.push(FixResult::skipped(
+                            cert.domain.clone(),
+                            CertificateType::ServerCert,
+                            "Missing parent CA reference".to_string(),
+                        ));
+                        continue;
+                    };
                     match resign_tls_certificate(context, cert_dir, parent) {
                         Ok(new_serial) => {
                             println!(
@@ -3296,6 +3303,176 @@ impl From<&CertType> for CertificateType {
     }
 }
 
+// ============================================
+// Git auto-commit functions
+// ============================================
+
+/// Initialize a git repository in the context folder if it doesn't exist.
+/// Creates a .gitignore that excludes private key files.
+pub fn init_git_repo(context: &Path) -> Result<()> {
+    let git_dir = context.join(".git");
+
+    if git_dir.exists() {
+        debug!("Git repo already exists at {}", context.display());
+        return Ok(());
+    }
+
+    // Initialize git repo
+    let output = std::process::Command::new("git")
+        .args(["init"])
+        .current_dir(context)
+        .output();
+
+    match output {
+        Ok(output) if output.status.success() => {
+            debug!("Initialized git repo at {}", context.display());
+        }
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            tracing::warn!("Failed to init git repo: {}", stderr);
+            return Ok(());
+        }
+        Err(e) => {
+            tracing::warn!("Git not available or failed to init repo: {}", e);
+            return Ok(());
+        }
+    }
+
+    // Create .gitignore to exclude private keys
+    let gitignore_content = r#"# Private keys - NEVER commit these
+*.pem
+*.key
+key.pass
+*.p12
+p12.pass
+"#;
+    let gitignore_path = context.join(".gitignore");
+    if let Err(e) = fs::write(&gitignore_path, gitignore_content) {
+        tracing::warn!("Failed to write .gitignore: {}", e);
+    }
+
+    // Do initial commit with .gitignore
+    let add_output = std::process::Command::new("git")
+        .args(["add", ".gitignore"])
+        .current_dir(context)
+        .output();
+
+    if let Ok(output) = add_output {
+        if output.status.success() {
+            let commit_output = std::process::Command::new("git")
+                .args([
+                    "commit",
+                    "-m",
+                    "Initial commit: add .gitignore for private keys",
+                ])
+                .current_dir(context)
+                .output();
+
+            if let Err(e) = commit_output {
+                tracing::warn!("Failed to create initial commit: {}", e);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Stage and commit all changes except private key files.
+/// Returns the commit hash on success, None if nothing was committed.
+pub fn git_add_and_commit(context: &Path, message: &str) -> Result<Option<String>> {
+    // First ensure git repo exists
+    let git_dir = context.join(".git");
+    if !git_dir.exists() {
+        init_git_repo(context)?;
+    }
+
+    // Stage all files except private keys using git add with inverse of .gitignore
+    // We'll use git add -A then reset the private key files
+    let add_all = std::process::Command::new("git")
+        .args(["add", "-A"])
+        .current_dir(context)
+        .output();
+
+    if let Err(e) = add_all {
+        tracing::warn!("Git add failed: {}", e);
+        return Ok(None);
+    }
+
+    let add_output = add_all.unwrap();
+    if !add_output.status.success() {
+        let stderr = String::from_utf8_lossy(&add_output.stderr);
+        tracing::warn!("Git add failed: {}", stderr);
+        return Ok(None);
+    }
+
+    // Reset private key files from staging
+    let reset_keys = std::process::Command::new("git")
+        .args(["reset", "--", "*.pem", "key.pass", "*.p12", "p12.pass"])
+        .current_dir(context)
+        .output();
+
+    if let Err(e) = reset_keys {
+        tracing::warn!("Git reset for private keys failed: {}", e);
+    }
+
+    // Check if there are staged changes
+    let status_output = std::process::Command::new("git")
+        .args(["status", "--porcelain"])
+        .current_dir(context)
+        .output();
+
+    let has_staged_changes = if let Ok(output) = status_output {
+        if output.status.success() {
+            let status = String::from_utf8_lossy(&output.stdout);
+            !status.trim().is_empty()
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+
+    if !has_staged_changes {
+        debug!("No changes to commit");
+        return Ok(None);
+    }
+
+    // Commit with the provided message
+    let commit_output = std::process::Command::new("git")
+        .args(["commit", "-m", message])
+        .current_dir(context)
+        .output();
+
+    match commit_output {
+        Ok(output) if output.status.success() => {
+            // Get the commit hash
+            let hash_output = std::process::Command::new("git")
+                .args(["rev-parse", "--short", "HEAD"])
+                .current_dir(context)
+                .output();
+
+            if let Ok(hash_out) = hash_output {
+                if hash_out.status.success() {
+                    let commit_hash = String::from_utf8_lossy(&hash_out.stdout).trim().to_string();
+                    debug!("Committed changes: {} ({})", message, commit_hash);
+                    return Ok(Some(commit_hash));
+                }
+            }
+            debug!("Committed changes: {}", message);
+            Ok(None)
+        }
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            tracing::warn!("Git commit failed: {}", stderr);
+            Ok(None)
+        }
+        Err(e) => {
+            tracing::warn!("Git commit failed: {}", e);
+            Ok(None)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3709,7 +3886,7 @@ DNS.3 = test.example.com
 
         // Non-existent file
         let result = check_certificate_expiry(&cert_path.join("nonexistent"));
-        assert!(result.unwrap_or(false) == false);
+        assert!(!result.unwrap_or(false));
 
         // Empty file
         fs::write(&cert_path, "").unwrap();
@@ -4124,7 +4301,7 @@ IP.1 = 127.0.0.1
 
         // Non-existent file should return Ok(false)
         let result = check_certificate_expiry(&cert_path);
-        assert!(result.unwrap_or(false) == false);
+        assert!(!result.unwrap_or(false));
     }
 
     #[test]
@@ -4571,7 +4748,7 @@ DNS.3=foo.bar.com
         let temp_dir = tempfile::tempdir().unwrap();
         let nonexistent = temp_dir.path().join("nonexistent.crt");
         let result = check_certificate_expiry(&nonexistent).unwrap();
-        assert_eq!(result, false);
+        assert!(!result);
     }
 
     #[test]
@@ -4994,7 +5171,7 @@ DNS.3=foo.bar.com
             .format("%b %d %H:%M:%S %Y GMT")
             .to_string();
         let days = calculate_days_until_expiry(&future_date);
-        assert!(days >= 29 && days <= 30);
+        assert!((29..=30).contains(&days));
     }
 
     #[test]
@@ -5334,7 +5511,7 @@ DNS.3=foo.bar.com
             .arg("-out")
             .arg(&out_tmp)
             .arg("-passout")
-            .arg(&format!("pass:{passphrase}"))
+            .arg(format!("pass:{passphrase}"))
             .output()
             .expect("failed to encrypt key");
         assert!(
@@ -5626,175 +5803,5 @@ DNS.3=foo.bar.com
         assert!(!result.fixed);
         assert!(result.skipped);
         assert_eq!(result.domain, "test.com");
-    }
-}
-
-// ============================================
-// Git auto-commit functions
-// ============================================
-
-/// Initialize a git repository in the context folder if it doesn't exist.
-/// Creates a .gitignore that excludes private key files.
-pub fn init_git_repo(context: &Path) -> Result<()> {
-    let git_dir = context.join(".git");
-
-    if git_dir.exists() {
-        debug!("Git repo already exists at {}", context.display());
-        return Ok(());
-    }
-
-    // Initialize git repo
-    let output = std::process::Command::new("git")
-        .args(["init"])
-        .current_dir(context)
-        .output();
-
-    match output {
-        Ok(output) if output.status.success() => {
-            debug!("Initialized git repo at {}", context.display());
-        }
-        Ok(output) => {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            tracing::warn!("Failed to init git repo: {}", stderr);
-            return Ok(()); // Don't fail, just warn
-        }
-        Err(e) => {
-            tracing::warn!("Git not available or failed to init repo: {}", e);
-            return Ok(()); // Don't fail, just warn
-        }
-    }
-
-    // Create .gitignore to exclude private keys
-    let gitignore_content = r#"# Private keys - NEVER commit these
-*.pem
-*.key
-key.pass
-*.p12
-p12.pass
-"#;
-    let gitignore_path = context.join(".gitignore");
-    if let Err(e) = fs::write(&gitignore_path, gitignore_content) {
-        tracing::warn!("Failed to write .gitignore: {}", e);
-    }
-
-    // Do initial commit with .gitignore
-    let add_output = std::process::Command::new("git")
-        .args(["add", ".gitignore"])
-        .current_dir(context)
-        .output();
-
-    if let Ok(output) = add_output {
-        if output.status.success() {
-            let commit_output = std::process::Command::new("git")
-                .args([
-                    "commit",
-                    "-m",
-                    "Initial commit: add .gitignore for private keys",
-                ])
-                .current_dir(context)
-                .output();
-
-            if let Err(e) = commit_output {
-                tracing::warn!("Failed to create initial commit: {}", e);
-            }
-        }
-    }
-
-    Ok(())
-}
-
-/// Stage and commit all changes except private key files.
-/// Returns the commit hash on success, None if nothing was committed.
-pub fn git_add_and_commit(context: &Path, message: &str) -> Result<Option<String>> {
-    // First ensure git repo exists
-    let git_dir = context.join(".git");
-    if !git_dir.exists() {
-        init_git_repo(context)?;
-    }
-
-    // Stage all files except private keys using git add with inverse of .gitignore
-    // We'll use git add -A then reset the private key files
-    let add_all = std::process::Command::new("git")
-        .args(["add", "-A"])
-        .current_dir(context)
-        .output();
-
-    if let Err(e) = add_all {
-        tracing::warn!("Git add failed: {}", e);
-        return Ok(None);
-    }
-
-    let add_output = add_all.unwrap();
-    if !add_output.status.success() {
-        let stderr = String::from_utf8_lossy(&add_output.stderr);
-        tracing::warn!("Git add failed: {}", stderr);
-        return Ok(None);
-    }
-
-    // Reset private key files from staging
-    let reset_keys = std::process::Command::new("git")
-        .args(["reset", "--", "*.pem", "key.pass", "*.p12", "p12.pass"])
-        .current_dir(context)
-        .output();
-
-    if let Err(e) = reset_keys {
-        tracing::warn!("Git reset for private keys failed: {}", e);
-    }
-
-    // Check if there are staged changes
-    let status_output = std::process::Command::new("git")
-        .args(["status", "--porcelain"])
-        .current_dir(context)
-        .output();
-
-    let has_staged_changes = if let Ok(output) = status_output {
-        if output.status.success() {
-            let status = String::from_utf8_lossy(&output.stdout);
-            !status.trim().is_empty()
-        } else {
-            false
-        }
-    } else {
-        false
-    };
-
-    if !has_staged_changes {
-        debug!("No changes to commit");
-        return Ok(None);
-    }
-
-    // Commit with the provided message
-    let commit_output = std::process::Command::new("git")
-        .args(["commit", "-m", message])
-        .current_dir(context)
-        .output();
-
-    match commit_output {
-        Ok(output) if output.status.success() => {
-            // Get the commit hash
-            let hash_output = std::process::Command::new("git")
-                .args(["rev-parse", "--short", "HEAD"])
-                .current_dir(context)
-                .output();
-
-            if let Ok(hash_out) = hash_output {
-                if hash_out.status.success() {
-                    let commit_hash = String::from_utf8_lossy(&hash_out.stdout).trim().to_string();
-                    debug!("Committed changes: {} ({})", message, commit_hash);
-                    return Ok(Some(commit_hash));
-                }
-            }
-            debug!("Committed changes: {}", message);
-            Ok(None)
-        }
-        Ok(output) => {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            tracing::warn!("Git commit failed: {}", stderr);
-            Ok(None)
-        }
-        Err(e) => {
-            tracing::warn!("Git commit failed: {}", e);
-            Ok(None)
-        }
     }
 }

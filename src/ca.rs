@@ -93,7 +93,7 @@ pub async fn init_root_ca(
     builder.set_pubkey(&pkey)?;
     let not_before = Asn1Time::days_from_now(0)?;
     let days = expiration_days.unwrap_or(7300); // Default 20 years
-    let not_after = Asn1Time::days_from_now(days.into())?;
+    let not_after = Asn1Time::days_from_now(days)?;
     builder.set_not_before(&not_before)?;
     builder.set_not_after(&not_after)?;
 
