@@ -16,22 +16,15 @@ permissions:
   pull-requests: read
 
 jobs:
-  pipeline:
+  pre-checks:
+    name: pre-checks (version, permission)
     runs-on: ubuntu-latest
+    outputs:
+      version_changed: ${{ steps.changes.outputs.version_changed }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.x"
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-
-      - uses: Swatinem/rust-cache@v2
 
       - name: Detect VERSION change
         id: changes
@@ -91,89 +84,146 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           python -m pip install --upgrade pip
           python -m pip install bumpver
-          make bump VERSION=build
+          make bump BUMP_TYPE=build
+          git push
 
-      - name: Export version
-        shell: bash
-        run: echo "VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
+  cargo-check:
+    name: cargo check
+    runs-on: ubuntu-latest
+    needs: [pre-checks]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --all-targets
 
-      - name: cargo fmt
-        run: cargo fmt --check
-
-      - name: clippy
-        run: make clippy
-
-      - name: cargo check
-        run: cargo check --all-targets
-
-      - name: tests (nextest + coverage)
-        shell: bash
-        run: |
-          set -euo pipefail
-          cargo install cargo-nextest --locked || true
-          cargo install cargo-llvm-cov --locked || true
-          make test
-
-      - name: e2e (quickstart)
-        shell: bash
-        run: |
-          set -euo pipefail
-          chmod +x ./scripts/quickstart.sh
-          ./scripts/quickstart.sh
-
-      - name: audit
-        run: make audit
-
-      - name: Install musl tooling
-        if: github.event_name == 'push' && (github.ref_name == 'main' || github.ref_name == 'master')
-        run: sudo apt-get update && sudo apt-get install -y musl-tools
-
-      - name: Build artifacts
-        if: github.event_name == 'push' && (github.ref_name == 'main' || github.ref_name == 'master')
-        shell: bash
-        run: |
-          set -euo pipefail
-          rm -rf dist
-          mkdir -p dist
-
-          make build
-          cp target/release/certboy "dist/certboy-${VERSION}-x86_64-unknown-linux-gnu"
-
-          make musl
-          cp target/x86_64-unknown-linux-musl/release/certboy "dist/certboy-${VERSION}-x86_64-unknown-linux-musl"
-
-      - uses: actions/upload-artifact@v4
-        if: github.event_name == 'push' && (github.ref_name == 'main' || github.ref_name == 'master')
+  cargo-fmt:
+    name: cargo fmt
+    runs-on: ubuntu-latest
+    needs: [pre-checks]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          name: certboy-${{ env.VERSION }}
-          path: dist/
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --check
 
-      - name: Enforce release permission (pushes)
-        if: github.event_name == 'push' && (github.ref_name == 'main' || github.ref_name == 'master') && steps.changes.outputs.version_changed == 'true'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          user="${{ github.actor }}"
-          perm="$(curl -fsSL \
-            -H "Authorization: Bearer $GITHUB_TOKEN" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/repos/${{ github.repository }}/collaborators/$user/permission" \
-            | jq -r '.permission')"
+  cargo-clippy:
+    name: cargo clippy
+    runs-on: ubuntu-latest
+    needs: [pre-checks]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: make clippy
 
-          case "$perm" in
-            admin|maintain|write) ;;
-            *) echo "Releases require write access; $user has permission: $perm"; exit 1 ;;
-          esac
+  cargo-test:
+    name: tests (nextest + coverage)
+    runs-on: ubuntu-latest
+    needs: [pre-checks]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo install cargo-nextest --locked || true
+      - run: cargo install cargo-llvm-cov --locked || true
+      - run: make test
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-artifacts
+          path: |
+            target/nextest/ci/junit.xml
+            target/llvm-cov-target/cobertura.xml
+            target/html/
+
+  e2e:
+    name: e2e (quickstart)
+    runs-on: ubuntu-latest
+    needs: [pre-checks]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: chmod +x ./scripts/quickstart.sh
+      - run: ./scripts/quickstart.sh
+
+  audit:
+    name: cargo audit
+    runs-on: ubuntu-latest
+    needs: [pre-checks]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo install cargo-audit --locked || true
+      - run: make audit
+
+  build:
+    name: build (release)
+    runs-on: ubuntu-latest
+    needs: [pre-checks, cargo-check, cargo-fmt, cargo-clippy, cargo-test, e2e, audit]
+    if: github.event_name == 'push' && (github.ref_name == 'main' || github.ref_name == 'master')
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: echo "VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
+      - run: cargo build --release --locked
+      - run: mv target/release/certboy "certboy-${VERSION}-x86_64-unknown-linux-gnu"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: certboy-${{ env.VERSION }}-gnu
+          path: certboy-${{ env.VERSION }}-x86_64-unknown-linux-gnu
+
+  build-musl:
+    name: build (x86_64-unknown-linux-musl)
+    runs-on: ubuntu-latest
+    needs: [pre-checks, cargo-check, cargo-fmt, cargo-clippy, cargo-test, e2e, audit]
+    if: github.event_name == 'push' && (github.ref_name == 'main' || github.ref_name == 'master')
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - run: rustup target add x86_64-unknown-linux-musl
+      - run: echo "VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
+      - run: cargo build --release --locked --target x86_64-unknown-linux-musl
+      - run: mv target/x86_64-unknown-linux-musl/release/certboy "certboy-${VERSION}-x86_64-unknown-linux-musl"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: certboy-${{ env.VERSION }}-musl
+          path: certboy-${{ env.VERSION }}-x86_64-unknown-linux-musl
+
+  release:
+    name: GitHub Release & Crates.io Publish
+    runs-on: ubuntu-latest
+    needs: [pre-checks, build, build-musl]
+    if: github.event_name == 'push' && (github.ref_name == 'main' || github.ref_name == 'master') && needs.pre-checks.outputs.version_changed == 'true'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
 
       - name: Tag and GitHub release
-        if: github.event_name == 'push' && (github.ref_name == 'main' || github.ref_name == 'master') && steps.changes.outputs.version_changed == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
+          VERSION=$(cat VERSION)
           tag="v${VERSION}"
 
           git fetch --tags --force
@@ -188,7 +238,6 @@ jobs:
           gh release create "$tag" dist/* --title "$tag" --notes "Release $tag"
 
       - name: Publish to crates.io
-        if: github.event_name == 'push' && (github.ref_name == 'main' || github.ref_name == 'master') && steps.changes.outputs.version_changed == 'true'
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
         run: cargo publish --locked

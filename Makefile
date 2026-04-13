@@ -67,27 +67,27 @@ install-musl: musl
 
 check-deps:
 	@command -v bumpver >/dev/null 2>&1 || { echo >&2 "bumpver is not installed. Aborting."; exit 1; }
-	@if [ "$(VERSION)" = "patch" ]; then \
+	@if [ "$(BUMP_TYPE)" = "patch" ]; then \
 		command -v git-cliff >/dev/null 2>&1 || { echo >&2 "git-cliff is not installed. Aborting."; exit 1; }; \
 	fi
 
-VERSION ?= build
+BUMP_TYPE ?= build
 CURRENT_VERSION := $(shell cat VERSION 2>/dev/null || echo "unknown")
 
 DEV_SUFFIX := $(shell echo $(CURRENT_VERSION) | grep -E '\-dev\.[0-9]+')
-ifeq ($(VERSION),build)
+ifeq ($(BUMP_TYPE),build)
   ifeq ($(strip $(DEV_SUFFIX)),)
     BUMP_ARGS := --patch --tag=dev
   else
     BUMP_ARGS := --tag-num
   endif
-else ifeq ($(VERSION),patch)
+else ifeq ($(BUMP_TYPE),patch)
   BUMP_ARGS := --patch --tag=final
 else
-  $(error Invalid VERSION '$(VERSION)'. Use patch|build)
+  $(error Invalid BUMP_TYPE '$(BUMP_TYPE)'. Use patch|build)
 endif
 
-bump: check-deps ## Bump version. Usage: make bump VERSION=patch|build (default: build)
+bump: check-deps ## Bump version. Usage: make bump BUMP_TYPE=patch|build (default: build)
 	@NEXT_VERSION="$$(bumpver update --dry $(BUMP_ARGS) 2>&1 | grep "New Version:" | awk '{print $$NF}')" ; \
 	if [ -z "$$NEXT_VERSION" ]; then \
 		echo "Error: Could not calculate next version. Check bumpver args."; \
@@ -95,13 +95,13 @@ bump: check-deps ## Bump version. Usage: make bump VERSION=patch|build (default:
 	fi ; \
 	echo "Current version: $(CURRENT_VERSION)" ; \
 	echo "New version: v$$NEXT_VERSION" ; \
-	if [ "$(VERSION)" = "patch" ]; then \
+	if [ "$(BUMP_TYPE)" = "patch" ]; then \
 		git-cliff --tag "v$$NEXT_VERSION" -o CHANGELOG.md ; \
 		git add CHANGELOG.md Cargo.toml VERSION bumpver.toml ; \
 	fi ; \
 	bumpver update $(BUMP_ARGS) --allow-dirty --no-push ; \
 	cargo check ; \
-	if [ "$(VERSION)" = "patch" ]; then \
+	if [ "$(BUMP_TYPE)" = "patch" ]; then \
 		git add Cargo.lock ; \
 		git commit --amend --no-edit ; \
 		echo "Version bumped to v$$NEXT_VERSION and CHANGELOG.md updated." ; \
