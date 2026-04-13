@@ -170,7 +170,7 @@ jobs:
     name: build (release)
     runs-on: ubuntu-latest
     needs: [pre-checks, cargo-check, cargo-fmt, cargo-clippy, cargo-test, e2e, audit]
-    if: github.event_name == 'push' && (github.ref_name == 'main' || github.ref_name == 'master')
+    if: github.event_name == 'push' && (github.ref_name == 'main' || github.ref_name == 'master') && needs.pre-checks.outputs.version_changed == 'true'
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -187,7 +187,7 @@ jobs:
     name: build (x86_64-unknown-linux-musl)
     runs-on: ubuntu-latest
     needs: [pre-checks, cargo-check, cargo-fmt, cargo-clippy, cargo-test, e2e, audit]
-    if: github.event_name == 'push' && (github.ref_name == 'main' || github.ref_name == 'master')
+    if: github.event_name == 'push' && (github.ref_name == 'main' || github.ref_name == 'master') && needs.pre-checks.outputs.version_changed == 'true'
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
