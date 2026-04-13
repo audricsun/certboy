@@ -762,10 +762,7 @@ fn display_certificate_tree(
                     // Fallback to path-based detection
                     let path_str = cert.path.to_string_lossy().to_string();
                     if let Some(root) = extract_parent_ca(&path_str) {
-                        icas_by_root
-                            .entry(root)
-                            .or_default()
-                            .push(cert.clone());
+                        icas_by_root.entry(root).or_default().push(cert.clone());
                     } else {
                         root_cas.push(cert.clone());
                     }
@@ -782,10 +779,7 @@ fn display_certificate_tree(
                     // Fallback to path-based detection
                     let path_str = cert.path.to_string_lossy().to_string();
                     if let Some(ca) = extract_parent_ca(&path_str) {
-                        server_certs_by_ca
-                            .entry(ca)
-                            .or_default()
-                            .push(cert.clone());
+                        server_certs_by_ca.entry(ca).or_default().push(cert.clone());
                     } else {
                         root_cas.push(cert.clone());
                     }
