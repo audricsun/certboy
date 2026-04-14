@@ -515,7 +515,7 @@ fn serial_exists_in_context(context: &Path, serial_bytes: &[u8]) -> Result<bool>
 pub fn generate_unique_serial(context: &Path) -> Result<Asn1Integer> {
     let mut serial_bytes = [0u8; 20];
     loop {
-        rand::thread_rng().fill(&mut serial_bytes);
+        rand::rng().fill(&mut serial_bytes);
         // Skip zero serial (all zeros)
         if serial_bytes.iter().all(|&b| b == 0) {
             continue;
