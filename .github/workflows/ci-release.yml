@@ -74,12 +74,17 @@ jobs:
         run: |
           set -euo pipefail
           git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}"
-          # Set identity BEFORE make bump (which commits)
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           python -m pip install --upgrade pip
           python -m pip install bumpver
           make bump BUMP_TYPE=build
+          if git diff --quiet HEAD -- Cargo.lock; then
+            echo "Cargo.lock unchanged — not amending"
+          else
+            git add Cargo.lock
+            git commit --amend --no-edit
+          fi
           git push origin main
 
   build:
@@ -178,4 +183,11 @@ jobs:
       - name: Publish to crates.io
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
-        run: cargo publish
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.lock
+          git diff --cached --quiet || git commit -m "chore: update Cargo.lock"
+          cargo publish
