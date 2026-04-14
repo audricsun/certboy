@@ -102,6 +102,8 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Ensure remote URL uses token for push (checkout sets this, but re-confirm after bump)
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}"
           python -m pip install --upgrade pip
           python -m pip install bumpver
           make bump BUMP_TYPE=build
@@ -114,10 +116,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Verify gh is available before using it
+          if ! command -v gh >/dev/null 2>&1; then
+            echo "gh not available — skipping explicit cancellation (concurrency group will handle)"
+            exit 0
+          fi
           echo "Pipeline push detected — cancelling this workflow run (${{ github.run_id }}) to allow the new pipeline (triggered by the push) to proceed."
-          gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/cancel" \
-            --method POST \
-            --silent \
+          # Use GitHub REST API directly via curl as a fallback
+          curl -s -o /dev/null -w "%{http_code}" \
+            -X POST \
+            -H "Authorization: token ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/cancel" \
             || echo "Cancellation may have already occurred via concurrency group — continuing."
 
   cargo-check:
