@@ -51,7 +51,7 @@ jobs:
       - name: Enforce patch bump permission (direct main push)
         if: steps.changes.outputs.version_changed == 'true'
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
         shell: bash
         run: |
           set -euo pipefail
