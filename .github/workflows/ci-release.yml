@@ -74,12 +74,13 @@ jobs:
         run: |
           set -euo pipefail
           git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}"
-          # Set identity BEFORE make bump (which commits)
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           python -m pip install --upgrade pip
           python -m pip install bumpver
           make bump BUMP_TYPE=build
+          git add Cargo.lock
+          git diff --cached --quiet || git commit -m "chore: update Cargo.lock"
           git push origin main
 
   build:
