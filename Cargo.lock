@@ -188,7 +188,7 @@ dependencies = [
 
 [[package]]
 name = "certboy"
-version = "2026.16.11"
+version = "2026.16.12"
 dependencies = [
  "anyhow",
  "assert_cmd",
