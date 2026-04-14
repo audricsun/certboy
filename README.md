@@ -1,16 +1,16 @@
 # certboy
 
 certboy is a Rust CLI for managing a local PKI:
+
 - Root CA (self-signed)
 - Intermediate CA (issued by a Root CA)
 - TLS/server certificates (issued by Root CA or ICA)
 
+![screenshot](docs/screenshot.png)
+
 ## Disclaimer
 
 This project is just a POC for my personal study and homelab. DO NOT SUGGEST USING FOR PRODUCTION.
-
-![screenshot](docs/screenshot.png)
-
 certboy stores everything in a single “context” directory and provides utilities for creating, inspecting, exporting, importing, renewing, and revoking certificates.
 
 ## Default Context
@@ -18,7 +18,6 @@ certboy stores everything in a single “context” directory and provides utili
 - Default: `~/.local/state/certboy` (or `$XDG_STATE_HOME/certboy`)
 - Override: `--context <path>`
 - Env override: `CERTBOY_CONTEXT`
-- Legacy env fallbacks: `CERTM_CONTEXT`, `BW_MKCERT_CONTEXT`
 
 ## Key Algorithm
 
