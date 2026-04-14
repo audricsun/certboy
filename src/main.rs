@@ -78,7 +78,7 @@ struct Cli {
     )]
     expiration: Option<u32>,
 
-    /// Context path for certificates (default: $XDG_STATE_HOME/certboy or ~/.local/state/certboy; env: CERTBOY_CONTEXT; legacy env: CERTM_CONTEXT, BW_MKCERT_CONTEXT)
+    /// Context path for certificates (default: $XDG_STATE_HOME/certboy or ~/.local/state/certboy; env: CERTBOY_CONTEXT)
     #[arg(short = 'C', long, value_name = "PATH")]
     context: Option<PathBuf>,
 
@@ -118,7 +118,7 @@ enum Commands {
         #[arg(long)]
         verify_openssl: bool,
 
-        /// Context path (default: $XDG_STATE_HOME/certboy or ~/.local/state/certboy; env: CERTBOY_CONTEXT; legacy env: CERTM_CONTEXT, BW_MKCERT_CONTEXT)
+        /// Context path (default: $XDG_STATE_HOME/certboy or ~/.local/state/certboy; env: CERTBOY_CONTEXT)
         #[arg(short = 'C', long, value_name = "PATH")]
         context: Option<PathBuf>,
     },
@@ -172,7 +172,7 @@ Examples:
         #[arg(value_name = "DOMAIN")]
         domain: String,
 
-        /// Context path (default: $XDG_STATE_HOME/certboy or ~/.local/state/certboy; env: CERTBOY_CONTEXT; legacy env: CERTM_CONTEXT, BW_MKCERT_CONTEXT)
+        /// Context path (default: $XDG_STATE_HOME/certboy or ~/.local/state/certboy; env: CERTBOY_CONTEXT)
         #[arg(short = 'C', long, value_name = "PATH")]
         context: Option<PathBuf>,
     },
@@ -236,7 +236,7 @@ Examples:
         #[arg(value_name = "DOMAIN", required = true)]
         domains: Vec<String>,
 
-        /// Context path (default: $XDG_STATE_HOME/certboy or ~/.local/state/certboy; env: CERTBOY_CONTEXT; legacy env: CERTM_CONTEXT, BW_MKCERT_CONTEXT)
+        /// Context path (default: $XDG_STATE_HOME/certboy or ~/.local/state/certboy; env: CERTBOY_CONTEXT)
         #[arg(short = 'C', long, value_name = "PATH")]
         context: Option<PathBuf>,
 
@@ -274,14 +274,6 @@ fn get_context(context: Option<PathBuf>) -> PathBuf {
     }
 
     if let Some(path) = std::env::var_os("CERTBOY_CONTEXT").map(PathBuf::from) {
-        return path;
-    }
-
-    if let Some(path) = std::env::var_os("CERTM_CONTEXT").map(PathBuf::from) {
-        return path;
-    }
-
-    if let Some(path) = std::env::var_os("BW_MKCERT_CONTEXT").map(PathBuf::from) {
         return path;
     }
 

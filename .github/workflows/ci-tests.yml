@@ -23,18 +23,6 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
-      - name: Cache crates.io index
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/registry/index
-          key: crates-io-index-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: crates-io-index-${{ runner.os }}-
-      - name: Cache cargo install tools
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/bin
-          key: cargo-install-tools-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: cargo-install-tools-${{ runner.os }}-
       - uses: Swatinem/rust-cache@v2
       - run: cargo check --all-targets
 
@@ -46,18 +34,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
-      - name: Cache crates.io index
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/registry/index
-          key: crates-io-index-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: crates-io-index-${{ runner.os }}-
-      - name: Cache cargo install tools
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/bin
-          key: cargo-install-tools-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: cargo-install-tools-${{ runner.os }}-
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --check
 
@@ -69,18 +45,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-      - name: Cache crates.io index
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/registry/index
-          key: crates-io-index-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: crates-io-index-${{ runner.os }}-
-      - name: Cache cargo install tools
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/bin
-          key: cargo-install-tools-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: cargo-install-tools-${{ runner.os }}-
       - uses: Swatinem/rust-cache@v2
       - run: make clippy
 
@@ -96,16 +60,16 @@ jobs:
           path: ~/.cargo/registry/index
           key: crates-io-index-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: crates-io-index-${{ runner.os }}-
-      - name: Cache cargo install tools
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/bin
-          key: cargo-install-tools-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: cargo-install-tools-${{ runner.os }}-
       - uses: Swatinem/rust-cache@v2
-      - run: cargo install cargo-nextest --locked || true
-      - run: cargo install cargo-llvm-cov --locked || true
       - run: make test
+      - name: Code coverage summary
+        uses: irongut/CodeCoverageSummary@v1
+        with:
+          filename: target/llvm-cov-target/cobertura.xml
+          format: markdown
+          badge: true
+          fail_below_min: 70
+          thresholds: '80'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -121,18 +85,6 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
-      - name: Cache crates.io index
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/registry/index
-          key: crates-io-index-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: crates-io-index-${{ runner.os }}-
-      - name: Cache cargo install tools
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/bin
-          key: cargo-install-tools-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: cargo-install-tools-${{ runner.os }}-
       - uses: Swatinem/rust-cache@v2
       - run: chmod +x ./scripts/quickstart.sh
       - run: ./scripts/quickstart.sh
@@ -149,12 +101,5 @@ jobs:
           path: ~/.cargo/registry/index
           key: crates-io-index-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: crates-io-index-${{ runner.os }}-
-      - name: Cache cargo install tools
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/bin
-          key: cargo-install-tools-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: cargo-install-tools-${{ runner.os }}-
       - uses: Swatinem/rust-cache@v2
-      - run: cargo install cargo-audit --locked || true
       - run: make audit
