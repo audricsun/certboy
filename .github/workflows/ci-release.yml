@@ -21,7 +21,7 @@ jobs:
     outputs:
       version_changed: ${{ steps.changes.outputs.version_changed }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
           token: ${{ secrets.GH_PAT }}
@@ -87,13 +87,13 @@ jobs:
     needs: [pre-checks]
     if: needs.pre-checks.outputs.version_changed == 'true'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           token: ${{ secrets.GH_PAT }}
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: echo "VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
-      - run: cargo build --release --locked
+      - run: cargo build --release
       - run: mv target/release/certboy "certboy-${VERSION}-x86_64-unknown-linux-gnu"
       - uses: actions/upload-artifact@v4
         with:
@@ -106,7 +106,7 @@ jobs:
     needs: [pre-checks]
     if: needs.pre-checks.outputs.version_changed == 'true'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           token: ${{ secrets.GH_PAT }}
       - uses: dtolnay/rust-toolchain@stable
@@ -129,7 +129,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
           token: ${{ secrets.GH_PAT }}
@@ -175,4 +175,4 @@ jobs:
       - name: Publish to crates.io
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
-        run: cargo publish --locked
+        run: cargo publish
