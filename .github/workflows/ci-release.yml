@@ -1,0 +1,178 @@
+name: CI Release
+
+# Only runs on pushes to main — handles VERSION-gated release flow
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  pre-checks:
+    name: pre-checks (version, permission)
+    runs-on: ubuntu-latest
+    outputs:
+      version_changed: ${{ steps.changes.outputs.version_changed }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Detect VERSION change
+        id: changes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          before="${{ github.event.before }}"
+          head="${{ github.sha }}"
+
+          if [ "$before" = "0000000000000000000000000000000000000000" ] || [ "$before" = "$head" ]; then
+            changed=""
+          else
+            changed="$(git diff --name-only "$before" "$head" || true)"
+          fi
+
+          version_changed=false
+          if echo "$changed" | grep -q '^VERSION$'; then
+            version_changed=true
+          fi
+
+          echo "version_changed=$version_changed" >> "$GITHUB_OUTPUT"
+
+      - name: Enforce patch bump permission (direct main push)
+        if: steps.changes.outputs.version_changed == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          user="${{ github.actor }}"
+          perm="$(curl -fsSL \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${{ github.repository }}/collaborators/$user/permission" \
+            | jq -r '.permission')"
+          case "$perm" in
+            admin|maintain|write) echo "OK: $user has $perm access";;
+            *) echo "VERSION bumps on main require write access; $user has permission: $perm"; exit 1 ;;
+          esac
+
+      - name: Auto bump build version
+        if: steps.changes.outputs.version_changed != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}"
+          python -m pip install --upgrade pip
+          python -m pip install bumpver
+          make bump BUMP_TYPE=build
+          git push
+
+  build:
+    name: build (release)
+    runs-on: ubuntu-latest
+    needs: [pre-checks]
+    if: needs.pre-checks.outputs.version_changed == 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: echo "VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
+      - run: cargo build --release --locked
+      - run: mv target/release/certboy "certboy-${VERSION}-x86_64-unknown-linux-gnu"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: certboy-${{ env.VERSION }}-gnu
+          path: certboy-${{ env.VERSION }}-x86_64-unknown-linux-gnu
+
+  build-musl:
+    name: build (x86_64-unknown-linux-musl)
+    runs-on: ubuntu-latest
+    needs: [pre-checks]
+    if: needs.pre-checks.outputs.version_changed == 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq musl-tools
+      - run: rustup target add x86_64-unknown-linux-musl
+      - run: echo "VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
+      - run: cargo build --release --locked --target x86_64-unknown-linux-musl
+      - run: mv target/x86_64-unknown-linux-musl/release/certboy "certboy-${VERSION}-x86_64-unknown-linux-musl"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: certboy-${{ env.VERSION }}-musl
+          path: certboy-${{ env.VERSION }}-x86_64-unknown-linux-musl
+
+  release:
+    name: GitHub Release & Crates.io Publish
+    runs-on: ubuntu-latest
+    needs: [pre-checks, build, build-musl]
+    if: needs.pre-checks.outputs.version_changed == 'true'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Tag and GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f VERSION ]; then
+            echo "ERROR: VERSION file not found"
+            exit 1
+          fi
+          VERSION=$(cat VERSION)
+          if [ -z "$VERSION" ]; then
+            echo "ERROR: VERSION file is empty"
+            exit 1
+          fi
+          tag="v${VERSION}"
+
+          if [ ! -d dist ] || [ -z "$(ls -A dist/ 2>/dev/null)" ]; then
+            echo "ERROR: dist/ directory empty or missing"
+            exit 1
+          fi
+
+          git fetch --tags --force
+          if git ls-remote --tags origin "refs/tags/$tag" | grep -q "$tag"; then
+            echo "Tag already exists: $tag — skipping"
+          else
+            git tag -a "$tag" -m "$tag"
+            git push origin "$tag"
+          fi
+
+          gh release create "$tag" dist/* --title "$tag" --notes "Release $tag"
+
+      - name: Publish to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+        run: cargo publish --locked

@@ -1,0 +1,62 @@
+name: CI PR
+
+# Only runs on pull_request events — enforces VERSION bump permissions
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  version-check:
+    name: VERSION bump permission check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Detect VERSION change in PR
+        id: changes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          base="${{ github.event.pull_request.base.sha }}"
+          head="${{ github.event.pull_request.head.sha }}"
+          changed="$(git diff --name-only "$base" "$head" || true)"
+          actor="${{ github.event.pull_request.user.login }}"
+
+          version_changed=false
+          if echo "$changed" | grep -q '^VERSION$'; then
+            version_changed=true
+          fi
+
+          echo "version_changed=$version_changed" >> "$GITHUB_OUTPUT"
+          echo "actor=$actor" >> "$GITHUB_OUTPUT"
+
+      - name: Enforce patch bump permission (PR VERSION change)
+        if: steps.changes.outputs.version_changed == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          user="${{ steps.changes.outputs.actor }}"
+          perm="$(curl -fsSL \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${{ github.repository }}/collaborators/$user/permission" \
+            | jq -r '.permission')"
+
+          case "$perm" in
+            admin|maintain|write) echo "OK: $user has $perm access";;
+            *) echo "VERSION bumps require write access; $user has permission: $perm"; exit 1 ;;
+          esac
