@@ -79,8 +79,12 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install bumpver
           make bump BUMP_TYPE=build
-          git add Cargo.lock
-          git commit --amend --no-edit
+          if git diff --quiet HEAD -- Cargo.lock; then
+            echo "Cargo.lock unchanged — not amending"
+          else
+            git add Cargo.lock
+            git commit --amend --no-edit
+          fi
           git push origin main
 
   build:
