@@ -1,6 +1,6 @@
 # certboy
 
-certboy is a Rust CLI for managing a local PKI:
+Certboy is a Rust CLI for managing a local PKI:
 
 - Root CA (self-signed)
 - Intermediate CA (issued by a Root CA)
