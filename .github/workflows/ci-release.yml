@@ -80,7 +80,7 @@ jobs:
           python -m pip install bumpver
           make bump BUMP_TYPE=build
           git add Cargo.lock
-          git diff --cached --quiet || git commit -m "chore: update Cargo.lock"
+          git commit --amend --no-edit
           git push origin main
 
   build:
