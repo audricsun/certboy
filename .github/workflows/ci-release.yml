@@ -147,6 +147,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           if [ ! -f VERSION ]; then
             echo "ERROR: VERSION file not found"
             exit 1
