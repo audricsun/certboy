@@ -29,12 +29,6 @@ jobs:
           path: ~/.cargo/registry/index
           key: crates-io-index-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: crates-io-index-${{ runner.os }}-
-      - name: Cache cargo install tools
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/bin
-          key: cargo-install-tools-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: cargo-install-tools-${{ runner.os }}-
       - uses: Swatinem/rust-cache@v2
       - run: cargo check --all-targets
 
@@ -52,12 +46,6 @@ jobs:
           path: ~/.cargo/registry/index
           key: crates-io-index-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: crates-io-index-${{ runner.os }}-
-      - name: Cache cargo install tools
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/bin
-          key: cargo-install-tools-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: cargo-install-tools-${{ runner.os }}-
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --check
 
@@ -75,12 +63,6 @@ jobs:
           path: ~/.cargo/registry/index
           key: crates-io-index-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: crates-io-index-${{ runner.os }}-
-      - name: Cache cargo install tools
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/bin
-          key: cargo-install-tools-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: cargo-install-tools-${{ runner.os }}-
       - uses: Swatinem/rust-cache@v2
       - run: make clippy
 
@@ -103,9 +85,15 @@ jobs:
           key: cargo-install-tools-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: cargo-install-tools-${{ runner.os }}-
       - uses: Swatinem/rust-cache@v2
-      - run: cargo install cargo-nextest --locked || true
-      - run: cargo install cargo-llvm-cov --locked || true
       - run: make test
+      - name: Code coverage summary
+        uses: irongut/CodeCoverageSummary@v1.3.0
+        with:
+          filename: target/llvm-cov-target/cobertura.xml
+          format: markdown
+          badge: true
+          fail_below_min: 70
+          thresholds: '80'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -127,12 +115,6 @@ jobs:
           path: ~/.cargo/registry/index
           key: crates-io-index-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: crates-io-index-${{ runner.os }}-
-      - name: Cache cargo install tools
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/bin
-          key: cargo-install-tools-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: cargo-install-tools-${{ runner.os }}-
       - uses: Swatinem/rust-cache@v2
       - run: chmod +x ./scripts/quickstart.sh
       - run: ./scripts/quickstart.sh
@@ -149,12 +131,5 @@ jobs:
           path: ~/.cargo/registry/index
           key: crates-io-index-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: crates-io-index-${{ runner.os }}-
-      - name: Cache cargo install tools
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/bin
-          key: cargo-install-tools-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: cargo-install-tools-${{ runner.os }}-
       - uses: Swatinem/rust-cache@v2
-      - run: cargo install cargo-audit --locked || true
       - run: make audit

@@ -83,8 +83,6 @@ certboy check --renew
 
 - `LOGLEVEL`: default log level (`trace|debug|info|warn|error`)
 - `CERTBOY_CONTEXT`: default context path (equivalent to `--context`)
-- `CERTM_CONTEXT`: legacy fallback
-- `BW_MKCERT_CONTEXT`: legacy fallback
 
 ## Development
 

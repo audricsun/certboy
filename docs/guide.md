@@ -17,7 +17,6 @@ A context is a single directory that stores Root CAs, ICAs, and TLS certificates
 - Default: `~/.local/state/certboy` (or `$XDG_STATE_HOME/certboy`)
 - Override: `--context <path>`
 - Env override: `CERTBOY_CONTEXT`
-- Legacy env fallbacks: `CERTM_CONTEXT`, `BW_MKCERT_CONTEXT`
 
 ## Key Algorithm Inheritance
 
