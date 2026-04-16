@@ -120,8 +120,8 @@ enum Commands {
 
         /// Check remote TLS certificate against local certificate for TLS certs only (not CA/ICA)
         /// Shows: DNS resolution status, resolved IPs, and whether remote uses same TLS cert as local
-        #[arg(long)]
-        check_remote: bool,
+        #[arg(short = 'R', long)]
+        remote: bool,
 
         /// Context path (default: $XDG_STATE_HOME/certboy or ~/.local/state/certboy; env: CERTBOY_CONTEXT)
         #[arg(short = 'C', long, value_name = "PATH")]
@@ -306,7 +306,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 auto_fix,
                 yes,
                 verify_openssl,
-                check_remote,
+                remote,
                 context: cmd_context,
             } => {
                 let context = get_context(cmd_context.or(cli.context));
@@ -321,7 +321,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         auto_fix,
                         yes,
                         verify_openssl,
-                        check_remote,
+                        remote,
                     },
                 )
                 .await
@@ -568,7 +568,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 auto_fix: false,
                 yes: false,
                 verify_openssl: false,
-                check_remote: false,
+                remote: false,
             },
         )
         .await

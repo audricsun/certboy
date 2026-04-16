@@ -346,7 +346,7 @@ async fn test_list_certificates() {
             auto_fix: false,
             yes: false,
             verify_openssl: false,
-            check_remote: false,
+            remote: false,
         },
     )
     .await;
@@ -485,7 +485,7 @@ async fn test_list_certificates_with_ica() {
             auto_fix: false,
             yes: false,
             verify_openssl: false,
-            check_remote: false,
+            remote: false,
         },
     )
     .await;
@@ -875,7 +875,7 @@ async fn test_list_certificates_with_fullchain_check() {
             auto_fix: false,
             yes: false,
             verify_openssl: false,
-            check_remote: false,
+            remote: false,
         },
     )
     .await;
@@ -891,7 +891,7 @@ async fn test_list_certificates_with_fullchain_check() {
             auto_fix: true,
             yes: false,
             verify_openssl: false,
-            check_remote: false,
+            remote: false,
         },
     )
     .await;
@@ -1354,7 +1354,7 @@ async fn test_list_certificates_ica_signed() {
             auto_fix: false,
             yes: false,
             verify_openssl: false,
-            check_remote: false,
+            remote: false,
         },
     )
     .await;
@@ -1404,7 +1404,7 @@ async fn test_list_certificates_with_renew() {
             auto_fix: false,
             yes: false,
             verify_openssl: false,
-            check_remote: false,
+            remote: false,
         },
     )
     .await;
@@ -1465,7 +1465,7 @@ async fn test_list_certificates_ica_chain() {
             auto_fix: false,
             yes: false,
             verify_openssl: false,
-            check_remote: false,
+            remote: false,
         },
     )
     .await;
@@ -1515,7 +1515,7 @@ async fn test_list_certificates_custom_expiration_alert() {
             auto_fix: false,
             yes: false,
             verify_openssl: false,
-            check_remote: false,
+            remote: false,
         },
     )
     .await;
@@ -1542,7 +1542,7 @@ async fn test_check_with_empty_context() {
             auto_fix: false,
             yes: false,
             verify_openssl: false,
-            check_remote: false,
+            remote: false,
         },
     )
     .await;

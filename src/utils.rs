@@ -696,52 +696,72 @@ fn display_certificate_node(
 
     if let Some(remote) = remote_check {
         if cert.cert_type == CertificateType::ServerCert {
+            // DNS stage
             if remote.dns_resolved {
                 println!(
-                    "{}Remote: {} resolves to {}",
+                    "{}Remote DNS: {} resolves to {}",
                     detail_prefix.white(),
                     "✓".green(),
                     remote.resolved_ips.join(", ").yellow()
                 );
             } else {
                 let dns_msg = remote.dns_error.as_deref().unwrap_or("unknown error");
-                println!(
-                    "{}Remote: {} DNS failed - {}",
-                    detail_prefix.white(),
-                    "✗".red(),
-                    dns_msg.red()
-                );
+                println!("{}Remote DNS: {} failed", detail_prefix.white(), "✗".red());
+                println!("{}  └─ {}", detail_prefix.white(), dns_msg.red());
             }
 
-            if let Some(remote_cert) = &remote.remote_cert {
-                if remote.matches_local {
+            // Connectivity stage (only if DNS succeeded)
+            if remote.dns_resolved {
+                if remote.connectivity_success {
                     println!(
-                        "{}Remote: {} cert matches local",
+                        "{}Remote Connectivity: {} connected",
                         detail_prefix.white(),
                         "✓".green()
                     );
-                } else {
+                } else if let Some(conn_err) = &remote.connectivity_error {
                     println!(
-                        "{}Remote: {} cert differs from local",
+                        "{}Remote Connectivity: {} failed",
+                        detail_prefix.white(),
+                        "✗".red()
+                    );
+                    println!("{}  └─ {}", detail_prefix.white(), conn_err.red());
+                }
+            }
+
+            // CertSignature stage (only if connectivity succeeded)
+            if remote.connectivity_success {
+                if remote.matches_local {
+                    println!(
+                        "{}Remote CertSignature: {} matches local",
+                        detail_prefix.white(),
+                        "✓".green()
+                    );
+                } else if let Some(remote_cert) = &remote.remote_cert {
+                    println!(
+                        "{}Remote CertSignature: {} differs from local",
                         detail_prefix.white(),
                         "✗".red()
                     );
                     if let Some(local_s) = &remote.local_serial {
-                        println!("{}  Local:   {}", detail_prefix.white(), local_s.yellow());
+                        println!(
+                            "{}  ├─ Local:   {}",
+                            detail_prefix.white(),
+                            local_s.yellow()
+                        );
                     }
                     println!(
-                        "{}  Remote:  {}",
+                        "{}  └─ Remote:  {}",
                         detail_prefix.white(),
                         remote_cert.serial.yellow()
                     );
+                } else if let Some(cert_err) = &remote.cert_error {
+                    println!(
+                        "{}Remote CertSignature: {} failed",
+                        detail_prefix.white(),
+                        "✗".red()
+                    );
+                    println!("{}  └─ {}", detail_prefix.white(), cert_err.red());
                 }
-            } else if let Some(err) = &remote.remote_error {
-                println!(
-                    "{}Remote: {} fetch failed - {}",
-                    detail_prefix.white(),
-                    "✗".red(),
-                    err.red()
-                );
             }
         }
     }
@@ -2584,7 +2604,7 @@ pub async fn list_certificates(context: &Path, options: CheckOptions) -> Result<
         auto_fix,
         yes,
         verify_openssl,
-        check_remote,
+        remote,
     } = options;
     let context_str = context.display().to_string();
     let home = dirs::home_dir()
@@ -2725,7 +2745,7 @@ pub async fn list_certificates(context: &Path, options: CheckOptions) -> Result<
     let mut skip_flat_display = false;
 
     // Build remote check results if requested
-    let remote_checks = if check_remote {
+    let remote_checks = if remote {
         run_remote_checks(&certificates).await?
     } else {
         std::collections::HashMap::new()
@@ -3203,10 +3223,33 @@ struct RemoteCheckResult {
     dns_resolved: bool,
     resolved_ips: Vec<String>,
     dns_error: Option<String>,
+    connectivity_success: bool,
+    connectivity_error: Option<String>,
     remote_cert: Option<RemoteCertInfo>,
-    remote_error: Option<String>,
+    cert_error: Option<String>,
     matches_local: bool,
     local_serial: Option<String>,
+}
+
+/// TCP connect to a domain:443
+async fn tcp_connect(domain: &str) -> Result<()> {
+    let domain = domain.to_string();
+    tokio::task::spawn_blocking(move || -> Result<()> {
+        use std::net::TcpStream;
+        let stream = TcpStream::connect(format!("{}:443", domain))
+            .map_err(|e| anyhow::anyhow!("TCP connect error: {}", e))?;
+        stream
+            .set_read_timeout(Some(std::time::Duration::from_secs(10)))
+            .map_err(|e| anyhow::anyhow!("Set read timeout error: {}", e))?;
+        stream
+            .set_write_timeout(Some(std::time::Duration::from_secs(10)))
+            .map_err(|e| anyhow::anyhow!("Set write timeout error: {}", e))?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("Task join error: {}", e))?
+    .map_err(|e| anyhow::anyhow!("TCP connect error: {}", e))?;
+    Ok(())
 }
 
 /// Fetch remote TLS certificate from a domain:443 using openssl
@@ -3237,13 +3280,11 @@ async fn fetch_remote_cert(domain: &str) -> Result<RemoteCertInfo> {
             .connect(&domain, stream)
             .map_err(|e| anyhow::anyhow!("SSL connect error: {}", e))?;
 
-        // Get peer certificate via ssl_ref
         let cert = ssl
             .ssl()
             .peer_certificate()
             .ok_or_else(|| anyhow::anyhow!("No peer certificate found"))?;
 
-        // Extract serial
         let serial_bn = cert
             .serial_number()
             .to_bn()
@@ -3292,10 +3333,24 @@ async fn run_remote_checks(
             Err(e) => (false, vec![], Some(e.to_string())),
         };
 
-        // Fetch remote cert
-        let (remote_cert, remote_error) = match fetch_remote_cert(&domain).await {
-            Ok(info) => (Some(info), None),
-            Err(e) => (None, Some(e.to_string())),
+        // Connectivity check (only if DNS succeeded)
+        let (connectivity_success, connectivity_error) = if dns_resolved {
+            match tcp_connect(&domain).await {
+                Ok(()) => (true, None),
+                Err(e) => (false, Some(e.to_string())),
+            }
+        } else {
+            (false, None)
+        };
+
+        // CertSignature check (only if connectivity succeeded)
+        let (remote_cert, cert_error) = if connectivity_success {
+            match fetch_remote_cert(&domain).await {
+                Ok(info) => (Some(info), None),
+                Err(e) => (None, Some(e.to_string())),
+            }
+        } else {
+            (None, None)
         };
 
         // Compare with local
@@ -3327,8 +3382,10 @@ async fn run_remote_checks(
                 dns_resolved,
                 resolved_ips,
                 dns_error,
+                connectivity_success,
+                connectivity_error,
                 remote_cert,
-                remote_error,
+                cert_error,
                 matches_local,
                 local_serial,
             },
@@ -3498,7 +3555,7 @@ pub struct CheckOptions {
     /// Verify that private key matches certificate using OpenSSL
     pub verify_openssl: bool,
     /// Check remote TLS certificate against local certificate
-    pub check_remote: bool,
+    pub remote: bool,
 }
 
 struct DisplayOptions {
@@ -5605,7 +5662,7 @@ DNS.3=foo.bar.com
                 auto_fix: false,
                 yes: false,
                 verify_openssl: false,
-                check_remote: false,
+                remote: false,
             },
         )
         .await;
