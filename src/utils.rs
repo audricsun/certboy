@@ -2550,6 +2550,7 @@ pub async fn list_certificates(
     auto_fix: bool,
     yes: bool,
     verify_openssl: bool,
+    check_remote: bool,
 ) -> Result<()> {
     let context_str = context.display().to_string();
     let home = dirs::home_dir()
@@ -2685,6 +2686,106 @@ pub async fn list_certificates(
             certs
         }
     };
+
+    // Handle check_remote: only for TLS certs, check remote DNS and TLS cert match
+    if check_remote {
+        // Filter to only TLS/Server certificates
+        let tls_certs: Vec<_> = certificates
+            .iter()
+            .filter(|c| c.cert_type == CertificateType::ServerCert)
+            .collect();
+
+        if tls_certs.is_empty() {
+            println!("No TLS certificates found to check.");
+            return Ok(());
+        }
+
+        println!("\n=== Remote TLS Certificate Check ===\n");
+
+        for cert in tls_certs {
+            println!("Checking domain: {}", cert.domain.blue().bold());
+            println!("  Local cert path: {}", shorten_path(&cert.path));
+
+            // 1. DNS resolution check
+            println!("\n  [1] DNS Resolution:");
+            match tokio::task::spawn_blocking({
+                let domain = cert.domain.clone();
+                move || {
+                    use std::net::ToSocketAddrs;
+                    let addr_str = format!("{}:443", domain);
+                    addr_str.to_socket_addrs()
+                }
+            })
+            .await
+            {
+                Ok(Ok(ips)) => {
+                    let ip_list: Vec<String> = ips.map(|a| a.ip().to_string()).collect();
+                    if ip_list.is_empty() {
+                        println!("    ✗ Domain '{}' is not resolvable", cert.domain.red());
+                    } else {
+                        println!(
+                            "    ✓ Domain resolves to: {}",
+                            ip_list.join(", ").yellow()
+                        );
+                    }
+                }
+                Ok(Err(e)) => {
+                    println!(
+                        "    ✗ DNS resolution failed for '{}': {}",
+                        cert.domain.red(),
+                        e
+                    );
+                }
+                Err(e) => {
+                    println!("    ✗ Task error: {}", e.to_string().red());
+                }
+            }
+
+            // 2. Fetch remote TLS certificate
+            println!("\n  [2] Remote TLS Certificate:");
+            match fetch_remote_cert(&cert.domain).await {
+                Ok(remote_cert_info) => {
+                    println!("    ✓ Connected to {}:443", cert.domain.green());
+                    println!("    Remote Subject: {}", remote_cert_info.subject.yellow());
+                    println!("    Remote Issuer: {}", remote_cert_info.issuer.yellow());
+                    println!("    Remote Serial: {}", remote_cert_info.serial.yellow());
+
+                    // 3. Compare with local certificate
+                    println!("\n  [3] Certificate Comparison:");
+                    if let Ok(local_pem) = fs::read(&cert.path) {
+                        if let Ok(local_cert) = X509::from_pem(&local_pem) {
+                            let local_serial = local_cert
+                                .serial_number()
+                                .to_bn()
+                                .ok()
+                                .and_then(|bn| bn.to_hex_str().ok())
+                                .map(|s| s.to_string())
+                                .unwrap_or_default();
+
+                            if local_serial.to_lowercase() == remote_cert_info.serial.to_lowercase() {
+                                println!(
+                                    "    ✓ Remote certificate MATCHES local certificate (serial: {})",
+                                    local_serial.yellow()
+                                );
+                            } else {
+                                println!(
+                                    "    ✗ Remote certificate DIFFERS from local certificate");
+                                println!("      Local serial:   {}", local_serial.yellow());
+                                println!("      Remote serial: {}", remote_cert_info.serial.yellow());
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    println!("    ✗ Failed to fetch remote certificate: {}", e.to_string().red());
+                }
+            }
+
+            println!();
+        }
+
+        return Ok(());
+    }
 
     // First try to show tree structure (used for normal check and auto_fix)
     let mut skip_flat_display = false;
@@ -3141,6 +3242,91 @@ fn get_sans_from_path(path: &Path) -> Vec<String> {
     };
 
     parse_san_from_cert(&cert)
+}
+
+/// Remote certificate information fetched from a domain
+#[derive(Debug)]
+struct RemoteCertInfo {
+    subject: String,
+    issuer: String,
+    serial: String,
+}
+
+/// Fetch remote TLS certificate from a domain:443 using openssl
+async fn fetch_remote_cert(domain: &str) -> Result<RemoteCertInfo> {
+    use openssl::ssl::{SslMethod, SslConnector};
+    use std::net::TcpStream;
+
+    let domain = domain.to_string();
+
+    let result = tokio::task::spawn_blocking(move || -> Result<RemoteCertInfo> {
+        let mut connector = SslConnector::builder(SslMethod::tls_client())
+            .map_err(|e| anyhow::anyhow!("SSL connector error: {}", e))?;
+        connector.set_default_verify_paths()
+            .map_err(|e| anyhow::anyhow!("SSL verify paths error: {}", e))?;
+        let connector = connector.build();
+
+        let stream = TcpStream::connect(format!("{}:443", domain))
+            .map_err(|e| anyhow::anyhow!("TCP connect error: {}", e))?;
+        stream.set_read_timeout(Some(std::time::Duration::from_secs(10)))
+            .map_err(|e| anyhow::anyhow!("Set read timeout error: {}", e))?;
+        stream.set_write_timeout(Some(std::time::Duration::from_secs(10)))
+            .map_err(|e| anyhow::anyhow!("Set write timeout error: {}", e))?;
+
+        let mut ssl = connector.connect(&domain, stream)
+            .map_err(|e| anyhow::anyhow!("SSL connect error: {}", e))?;
+
+        // Get peer certificate via ssl_ref
+        let cert = ssl.ssl().peer_certificate()
+            .ok_or_else(|| anyhow::anyhow!("No peer certificate found"))?;
+
+        // Extract subject
+        let subject: String = cert
+            .subject_name()
+            .entries()
+            .filter_map(|e| {
+                let val = e.data().as_utf8().ok()?;
+                Some(format!(
+                    "{}={}",
+                    e.object().nid().short_name().unwrap_or("?"),
+                    val
+                ))
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        // Extract issuer
+        let issuer: String = cert
+            .issuer_name()
+            .entries()
+            .filter_map(|e| {
+                let val = e.data().as_utf8().ok()?;
+                Some(format!(
+                    "{}={}",
+                    e.object().nid().short_name().unwrap_or("?"),
+                    val
+                ))
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        // Extract serial
+        let serial_bn = cert.serial_number().to_bn()
+            .map_err(|e| anyhow::anyhow!("serial to_bn error: {}", e))?;
+        let serial = serial_bn.to_hex_str()
+            .map_err(|e| anyhow::anyhow!("serial to_hex_str error: {}", e))?
+            .to_string();
+
+        Ok(RemoteCertInfo {
+            subject,
+            issuer,
+            serial,
+        })
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("Task join error: {}", e))?;
+
+    result
 }
 
 async fn analyze_certificate(path: &Path, expiration_alert_days: u32) -> Option<CertificateInfo> {

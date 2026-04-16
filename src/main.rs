@@ -118,6 +118,11 @@ enum Commands {
         #[arg(long)]
         verify_openssl: bool,
 
+        /// Check remote TLS certificate against local certificate for TLS certs only (not CA/ICA)
+        /// Shows: DNS resolution status, resolved IPs, and whether remote uses same TLS cert as local
+        #[arg(long)]
+        check_remote: bool,
+
         /// Context path (default: $XDG_STATE_HOME/certboy or ~/.local/state/certboy; env: CERTBOY_CONTEXT)
         #[arg(short = 'C', long, value_name = "PATH")]
         context: Option<PathBuf>,
@@ -301,6 +306,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 auto_fix,
                 yes,
                 verify_openssl,
+                check_remote,
                 context: cmd_context,
             } => {
                 let context = get_context(cmd_context.or(cli.context));
@@ -314,6 +320,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     auto_fix,
                     yes,
                     verify_openssl,
+                    check_remote,
                 )
                 .await
                 {
@@ -550,7 +557,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let context = get_context(cli.context);
         info!("Executing check command (default behavior)");
 
-        match utils::list_certificates(&context, false, 14, false, false, false, false).await {
+        match utils::list_certificates(&context, false, 14, false, false, false, false, false).await {
             Ok(()) => {
                 info!("Check completed successfully");
             }
