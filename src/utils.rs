@@ -3231,24 +3231,17 @@ struct RemoteCheckResult {
     local_serial: Option<String>,
 }
 
-/// TCP connect to a domain:443
 async fn tcp_connect(domain: &str) -> Result<()> {
+    use tokio::net::TcpStream;
+    use tokio::time::{timeout, Duration};
+
     let domain = domain.to_string();
-    tokio::task::spawn_blocking(move || -> Result<()> {
-        use std::net::TcpStream;
-        let stream = TcpStream::connect(format!("{}:443", domain))
-            .map_err(|e| anyhow::anyhow!("TCP connect error: {}", e))?;
-        stream
-            .set_read_timeout(Some(std::time::Duration::from_secs(10)))
-            .map_err(|e| anyhow::anyhow!("Set read timeout error: {}", e))?;
-        stream
-            .set_write_timeout(Some(std::time::Duration::from_secs(10)))
-            .map_err(|e| anyhow::anyhow!("Set write timeout error: {}", e))?;
-        Ok(())
-    })
-    .await
-    .map_err(|e| anyhow::anyhow!("Task join error: {}", e))?
-    .map_err(|e| anyhow::anyhow!("TCP connect error: {}", e))?;
+    let connect_future = TcpStream::connect(format!("{}:443", domain));
+
+    timeout(Duration::from_millis(500), connect_future)
+        .await
+        .map_err(|_| anyhow::anyhow!("TCP connect timeout (>500ms)"))?
+        .map_err(|e| anyhow::anyhow!("TCP connect error: {}", e))?;
     Ok(())
 }
 
