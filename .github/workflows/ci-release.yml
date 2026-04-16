@@ -216,10 +216,11 @@ jobs:
 
           # Generate changelog for this release via git-cliff
           pip install --quiet git-cliff
-          if git-cliff --tag "$tag" --output /tmp/cliff_notes.md 2>/dev/null; then
-            echo "Generated changelog via git-cliff for tag $tag"
+          # Use --current to process commits belonging to the current tag (the one just pushed)
+          if git-cliff --current --output /tmp/cliff_notes.md 2>&1; then
+            echo "Generated changelog via git-cliff for current tag"
           else
-            echo "WARNING: git-cliff failed for tag $tag — using basic release notes"
+            echo "WARNING: git-cliff failed — using basic release notes"
             echo "Release $tag" > /tmp/cliff_notes.md
           fi
 
