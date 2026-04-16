@@ -3273,7 +3273,7 @@ async fn fetch_remote_cert(domain: &str) -> Result<RemoteCertInfo> {
         stream.set_write_timeout(Some(std::time::Duration::from_secs(10)))
             .map_err(|e| anyhow::anyhow!("Set write timeout error: {}", e))?;
 
-        let mut ssl = connector.connect(&domain, stream)
+        let ssl = connector.connect(&domain, stream)
             .map_err(|e| anyhow::anyhow!("SSL connect error: {}", e))?;
 
         // Get peer certificate via ssl_ref
