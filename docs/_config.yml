@@ -1,0 +1,16 @@
+# Jekyll configuration for certboy documentation
+title: Certboy
+description: Unified certificate management tool - Create Root CAs, Intermediate CAs, and server certificates
+url: "https://audricsun.github.io"
+repository: audricsun/certboy
+
+# Build settings
+markdown: kramdown
+theme: minima
+
+# Navigation
+defaults:
+  - scope:
+      path: ""
+    values:
+      layout: default
