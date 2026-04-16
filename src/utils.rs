@@ -572,9 +572,8 @@ fn display_certificate_node(
     ancestors_last: &[bool],
     is_last: bool,
     is_root: bool,
-    expiration_alert_days: u32,
-    detail: bool,
-    verify_openssl: bool,
+    options: &DisplayOptions,
+    remote_check: Option<&RemoteCheckResult>,
 ) {
     let tree_prefix = ancestors_last
         .iter()
@@ -606,7 +605,7 @@ fn display_certificate_node(
         CertificateType::ServerCert => "Server".blue(),
     };
 
-    let days_color = if cert.expires_in_days < expiration_alert_days as i64 {
+    let days_color = if cert.expires_in_days < options.expiration_alert_days as i64 {
         cert.expires_in_days.to_string().red()
     } else if cert.expires_in_days < 90 {
         cert.expires_in_days.to_string().yellow()
@@ -655,7 +654,7 @@ fn display_certificate_node(
 
     println!("{}Serial: {}", detail_prefix.white(), serial_display);
 
-    if detail && !cert.sans.is_empty() {
+    if options.detail && !cert.sans.is_empty() {
         println!(
             "{}SANs: {}",
             detail_prefix.white(),
@@ -668,7 +667,7 @@ fn display_certificate_node(
         println!("{}⚠️  Needs renewal!", detail_prefix.white().bold());
     }
 
-    if verify_openssl && cert.cert_type == CertificateType::ServerCert {
+    if options.verify_openssl && cert.cert_type == CertificateType::ServerCert {
         let cert_dir = cert.path.parent().unwrap();
         match verify_key_cert_match(cert_dir) {
             Ok((is_valid, message)) => {
@@ -690,6 +689,58 @@ fn display_certificate_node(
                     "{}OpenSSL: Error: {}",
                     detail_prefix.white(),
                     e.to_string().yellow()
+                );
+            }
+        }
+    }
+
+    if let Some(remote) = remote_check {
+        if cert.cert_type == CertificateType::ServerCert {
+            if remote.dns_resolved {
+                println!(
+                    "{}Remote: {} resolves to {}",
+                    detail_prefix.white(),
+                    "✓".green(),
+                    remote.resolved_ips.join(", ").yellow()
+                );
+            } else {
+                let dns_msg = remote.dns_error.as_deref().unwrap_or("unknown error");
+                println!(
+                    "{}Remote: {} DNS failed - {}",
+                    detail_prefix.white(),
+                    "✗".red(),
+                    dns_msg.red()
+                );
+            }
+
+            if let Some(remote_cert) = &remote.remote_cert {
+                if remote.matches_local {
+                    println!(
+                        "{}Remote: {} cert matches local",
+                        detail_prefix.white(),
+                        "✓".green()
+                    );
+                } else {
+                    println!(
+                        "{}Remote: {} cert differs from local",
+                        detail_prefix.white(),
+                        "✗".red()
+                    );
+                    if let Some(local_s) = &remote.local_serial {
+                        println!("{}  Local:   {}", detail_prefix.white(), local_s.yellow());
+                    }
+                    println!(
+                        "{}  Remote:  {}",
+                        detail_prefix.white(),
+                        remote_cert.serial.yellow()
+                    );
+                }
+            } else if let Some(err) = &remote.remote_error {
+                println!(
+                    "{}Remote: {} fetch failed - {}",
+                    detail_prefix.white(),
+                    "✗".red(),
+                    err.red()
                 );
             }
         }
@@ -733,9 +784,7 @@ impl CertificatePaths {
 
 fn display_certificate_tree(
     certificates: &[CertificateInfo],
-    expiration_alert_days: u32,
-    detail: bool,
-    verify_openssl: bool,
+    options: &DisplayOptions,
 ) -> Result<()> {
     use std::collections::HashMap;
 
@@ -804,19 +853,10 @@ fn display_certificate_tree(
             &[],
             true,
             true,
-            expiration_alert_days,
-            detail,
-            verify_openssl,
+            options,
+            options.remote_checks.get(&root.domain),
         );
-        display_children(
-            root,
-            &icas_by_root,
-            &server_certs_by_ca,
-            &[],
-            expiration_alert_days,
-            detail,
-            verify_openssl,
-        );
+        display_children(root, &icas_by_root, &server_certs_by_ca, &[], options);
 
         println!();
     }
@@ -855,9 +895,7 @@ fn display_children(
     icas_by_root: &std::collections::HashMap<String, Vec<CertificateInfo>>,
     server_certs_by_ca: &std::collections::HashMap<String, Vec<CertificateInfo>>,
     ancestors_last: &[bool],
-    expiration_alert_days: u32,
-    detail: bool,
-    verify_openssl: bool,
+    options: &DisplayOptions,
 ) {
     let mut icas = icas_by_root
         .get(&parent.domain)
@@ -883,9 +921,8 @@ fn display_children(
             ancestors_last,
             is_last_child,
             false,
-            expiration_alert_days,
-            detail,
-            verify_openssl,
+            options,
+            options.remote_checks.get(&ica.domain),
         );
         let mut next_ancestors = ancestors_last.to_vec();
         next_ancestors.push(is_last_child);
@@ -894,9 +931,7 @@ fn display_children(
             icas_by_root,
             server_certs_by_ca,
             &next_ancestors,
-            expiration_alert_days,
-            detail,
-            verify_openssl,
+            options,
         );
     }
 
@@ -908,9 +943,8 @@ fn display_children(
             ancestors_last,
             is_last_child,
             false,
-            expiration_alert_days,
-            detail,
-            verify_openssl,
+            options,
+            options.remote_checks.get(&server.domain),
         );
     }
 }
@@ -2542,16 +2576,16 @@ async fn resign_ica_certificate(context: &Path, ica_dir: &Path, parent_ca: &str)
     Ok(())
 }
 
-pub async fn list_certificates(
-    context: &Path,
-    renew: bool,
-    expiration_alert_days: u32,
-    detail: bool,
-    auto_fix: bool,
-    yes: bool,
-    verify_openssl: bool,
-    check_remote: bool,
-) -> Result<()> {
+pub async fn list_certificates(context: &Path, options: CheckOptions) -> Result<()> {
+    let CheckOptions {
+        renew,
+        expiration_alert_days,
+        detail,
+        auto_fix,
+        yes,
+        verify_openssl,
+        check_remote,
+    } = options;
     let context_str = context.display().to_string();
     let home = dirs::home_dir()
         .map(|h| h.display().to_string())
@@ -2687,112 +2721,25 @@ pub async fn list_certificates(
         }
     };
 
-    // Handle check_remote: only for TLS certs, check remote DNS and TLS cert match
-    if check_remote {
-        // Filter to only TLS/Server certificates
-        let tls_certs: Vec<_> = certificates
-            .iter()
-            .filter(|c| c.cert_type == CertificateType::ServerCert)
-            .collect();
-
-        if tls_certs.is_empty() {
-            println!("No TLS certificates found to check.");
-            return Ok(());
-        }
-
-        println!("\n=== Remote TLS Certificate Check ===\n");
-
-        for cert in tls_certs {
-            println!("Checking domain: {}", cert.domain.blue().bold());
-            println!("  Local cert path: {}", shorten_path(&cert.path));
-
-            // 1. DNS resolution check
-            println!("\n  [1] DNS Resolution:");
-            match tokio::task::spawn_blocking({
-                let domain = cert.domain.clone();
-                move || {
-                    use std::net::ToSocketAddrs;
-                    let addr_str = format!("{}:443", domain);
-                    addr_str.to_socket_addrs()
-                }
-            })
-            .await
-            {
-                Ok(Ok(ips)) => {
-                    let ip_list: Vec<String> = ips.map(|a| a.ip().to_string()).collect();
-                    if ip_list.is_empty() {
-                        println!("    ✗ Domain '{}' is not resolvable", cert.domain.red());
-                    } else {
-                        println!(
-                            "    ✓ Domain resolves to: {}",
-                            ip_list.join(", ").yellow()
-                        );
-                    }
-                }
-                Ok(Err(e)) => {
-                    println!(
-                        "    ✗ DNS resolution failed for '{}': {}",
-                        cert.domain.red(),
-                        e
-                    );
-                }
-                Err(e) => {
-                    println!("    ✗ Task error: {}", e.to_string().red());
-                }
-            }
-
-            // 2. Fetch remote TLS certificate
-            println!("\n  [2] Remote TLS Certificate:");
-            match fetch_remote_cert(&cert.domain).await {
-                Ok(remote_cert_info) => {
-                    println!("    ✓ Connected to {}:443", cert.domain.green());
-                    println!("    Remote Subject: {}", remote_cert_info.subject.yellow());
-                    println!("    Remote Issuer: {}", remote_cert_info.issuer.yellow());
-                    println!("    Remote Serial: {}", remote_cert_info.serial.yellow());
-
-                    // 3. Compare with local certificate
-                    println!("\n  [3] Certificate Comparison:");
-                    if let Ok(local_pem) = fs::read(&cert.path) {
-                        if let Ok(local_cert) = X509::from_pem(&local_pem) {
-                            let local_serial = local_cert
-                                .serial_number()
-                                .to_bn()
-                                .ok()
-                                .and_then(|bn| bn.to_hex_str().ok())
-                                .map(|s| s.to_string())
-                                .unwrap_or_default();
-
-                            if local_serial.to_lowercase() == remote_cert_info.serial.to_lowercase() {
-                                println!(
-                                    "    ✓ Remote certificate MATCHES local certificate (serial: {})",
-                                    local_serial.yellow()
-                                );
-                            } else {
-                                println!(
-                                    "    ✗ Remote certificate DIFFERS from local certificate");
-                                println!("      Local serial:   {}", local_serial.yellow());
-                                println!("      Remote serial: {}", remote_cert_info.serial.yellow());
-                            }
-                        }
-                    }
-                }
-                Err(e) => {
-                    println!("    ✗ Failed to fetch remote certificate: {}", e.to_string().red());
-                }
-            }
-
-            println!();
-        }
-
-        return Ok(());
-    }
-
     // First try to show tree structure (used for normal check and auto_fix)
     let mut skip_flat_display = false;
+
+    // Build remote check results if requested
+    let remote_checks = if check_remote {
+        run_remote_checks(&certificates).await?
+    } else {
+        std::collections::HashMap::new()
+    };
+
+    let display_options = DisplayOptions {
+        expiration_alert_days,
+        detail,
+        verify_openssl,
+        remote_checks,
+    };
+
     if !renew {
-        if let Ok(()) =
-            display_certificate_tree(&certificates, expiration_alert_days, detail, verify_openssl)
-        {
+        if let Ok(()) = display_certificate_tree(&certificates, &display_options) {
             if auto_fix {
                 skip_flat_display = true;
             } else {
@@ -3247,14 +3194,24 @@ fn get_sans_from_path(path: &Path) -> Vec<String> {
 /// Remote certificate information fetched from a domain
 #[derive(Debug)]
 struct RemoteCertInfo {
-    subject: String,
-    issuer: String,
     serial: String,
+}
+
+/// Aggregated remote check result for a domain
+#[derive(Debug)]
+struct RemoteCheckResult {
+    dns_resolved: bool,
+    resolved_ips: Vec<String>,
+    dns_error: Option<String>,
+    remote_cert: Option<RemoteCertInfo>,
+    remote_error: Option<String>,
+    matches_local: bool,
+    local_serial: Option<String>,
 }
 
 /// Fetch remote TLS certificate from a domain:443 using openssl
 async fn fetch_remote_cert(domain: &str) -> Result<RemoteCertInfo> {
-    use openssl::ssl::{SslMethod, SslConnector};
+    use openssl::ssl::{SslConnector, SslMethod};
     use std::net::TcpStream;
 
     let domain = domain.to_string();
@@ -3262,71 +3219,123 @@ async fn fetch_remote_cert(domain: &str) -> Result<RemoteCertInfo> {
     let result = tokio::task::spawn_blocking(move || -> Result<RemoteCertInfo> {
         let mut connector = SslConnector::builder(SslMethod::tls_client())
             .map_err(|e| anyhow::anyhow!("SSL connector error: {}", e))?;
-        connector.set_default_verify_paths()
+        connector
+            .set_default_verify_paths()
             .map_err(|e| anyhow::anyhow!("SSL verify paths error: {}", e))?;
         let connector = connector.build();
 
         let stream = TcpStream::connect(format!("{}:443", domain))
             .map_err(|e| anyhow::anyhow!("TCP connect error: {}", e))?;
-        stream.set_read_timeout(Some(std::time::Duration::from_secs(10)))
+        stream
+            .set_read_timeout(Some(std::time::Duration::from_secs(10)))
             .map_err(|e| anyhow::anyhow!("Set read timeout error: {}", e))?;
-        stream.set_write_timeout(Some(std::time::Duration::from_secs(10)))
+        stream
+            .set_write_timeout(Some(std::time::Duration::from_secs(10)))
             .map_err(|e| anyhow::anyhow!("Set write timeout error: {}", e))?;
 
-        let ssl = connector.connect(&domain, stream)
+        let ssl = connector
+            .connect(&domain, stream)
             .map_err(|e| anyhow::anyhow!("SSL connect error: {}", e))?;
 
         // Get peer certificate via ssl_ref
-        let cert = ssl.ssl().peer_certificate()
+        let cert = ssl
+            .ssl()
+            .peer_certificate()
             .ok_or_else(|| anyhow::anyhow!("No peer certificate found"))?;
 
-        // Extract subject
-        let subject: String = cert
-            .subject_name()
-            .entries()
-            .filter_map(|e| {
-                let val = e.data().as_utf8().ok()?;
-                Some(format!(
-                    "{}={}",
-                    e.object().nid().short_name().unwrap_or("?"),
-                    val
-                ))
-            })
-            .collect::<Vec<_>>()
-            .join(", ");
-
-        // Extract issuer
-        let issuer: String = cert
-            .issuer_name()
-            .entries()
-            .filter_map(|e| {
-                let val = e.data().as_utf8().ok()?;
-                Some(format!(
-                    "{}={}",
-                    e.object().nid().short_name().unwrap_or("?"),
-                    val
-                ))
-            })
-            .collect::<Vec<_>>()
-            .join(", ");
-
         // Extract serial
-        let serial_bn = cert.serial_number().to_bn()
+        let serial_bn = cert
+            .serial_number()
+            .to_bn()
             .map_err(|e| anyhow::anyhow!("serial to_bn error: {}", e))?;
-        let serial = serial_bn.to_hex_str()
+        let serial = serial_bn
+            .to_hex_str()
             .map_err(|e| anyhow::anyhow!("serial to_hex_str error: {}", e))?
             .to_string();
 
-        Ok(RemoteCertInfo {
-            subject,
-            issuer,
-            serial,
-        })
+        Ok(RemoteCertInfo { serial })
     })
     .await
     .map_err(|e| anyhow::anyhow!("Task join error: {}", e))?;
 
     result
+}
+
+async fn run_remote_checks(
+    certificates: &[CertificateInfo],
+) -> Result<std::collections::HashMap<String, RemoteCheckResult>> {
+    use std::collections::HashMap;
+    let mut results = HashMap::new();
+
+    for cert in certificates
+        .iter()
+        .filter(|c| c.cert_type == CertificateType::ServerCert)
+    {
+        let domain = cert.domain.clone();
+
+        // DNS resolution
+        let (dns_resolved, resolved_ips, dns_error) = match tokio::task::spawn_blocking({
+            let domain = domain.clone();
+            move || {
+                use std::net::ToSocketAddrs;
+                let addr_str = format!("{}:443", domain);
+                addr_str.to_socket_addrs()
+            }
+        })
+        .await
+        {
+            Ok(Ok(ips)) => {
+                let ip_list: Vec<String> = ips.map(|a| a.ip().to_string()).collect();
+                (true, ip_list, None)
+            }
+            Ok(Err(e)) => (false, vec![], Some(e.to_string())),
+            Err(e) => (false, vec![], Some(e.to_string())),
+        };
+
+        // Fetch remote cert
+        let (remote_cert, remote_error) = match fetch_remote_cert(&domain).await {
+            Ok(info) => (Some(info), None),
+            Err(e) => (None, Some(e.to_string())),
+        };
+
+        // Compare with local
+        let (matches_local, local_serial) = if let Some(remote) = &remote_cert {
+            if let Ok(local_pem) = fs::read(&cert.path) {
+                if let Ok(local_cert) = openssl::x509::X509::from_pem(&local_pem) {
+                    let local_s = local_cert
+                        .serial_number()
+                        .to_bn()
+                        .ok()
+                        .and_then(|bn| bn.to_hex_str().ok())
+                        .map(|s| s.to_string())
+                        .unwrap_or_default();
+                    let matches = local_s.to_lowercase() == remote.serial.to_lowercase();
+                    (matches, Some(local_s))
+                } else {
+                    (false, None)
+                }
+            } else {
+                (false, None)
+            }
+        } else {
+            (false, None)
+        };
+
+        results.insert(
+            domain,
+            RemoteCheckResult {
+                dns_resolved,
+                resolved_ips,
+                dns_error,
+                remote_cert,
+                remote_error,
+                matches_local,
+                local_serial,
+            },
+        );
+    }
+
+    Ok(results)
 }
 
 async fn analyze_certificate(path: &Path, expiration_alert_days: u32) -> Option<CertificateInfo> {
@@ -3471,6 +3480,32 @@ pub enum CertificateType {
     RootCa,
     IntermediateCa,
     ServerCert,
+}
+
+/// Options for the check command
+#[derive(Debug, Clone)]
+pub struct CheckOptions {
+    /// Renewal mode (re-issue certificates that need renewal)
+    pub renew: bool,
+    /// Number of days before expiration to trigger alerts
+    pub expiration_alert_days: u32,
+    /// Show detailed information for each certificate
+    pub detail: bool,
+    /// Automatically fix issues where possible
+    pub auto_fix: bool,
+    /// Assume "yes" to all prompts (non-interactive)
+    pub yes: bool,
+    /// Verify that private key matches certificate using OpenSSL
+    pub verify_openssl: bool,
+    /// Check remote TLS certificate against local certificate
+    pub check_remote: bool,
+}
+
+struct DisplayOptions {
+    expiration_alert_days: u32,
+    detail: bool,
+    verify_openssl: bool,
+    remote_checks: std::collections::HashMap<String, RemoteCheckResult>,
 }
 
 impl From<&CertType> for CertificateType {
@@ -4487,7 +4522,13 @@ IP.1 = 127.0.0.1
     #[test]
     fn test_display_certificate_tree_empty() {
         let certs: Vec<CertificateInfo> = vec![];
-        let result = display_certificate_tree(&certs, 14, false, false);
+        let options = DisplayOptions {
+            expiration_alert_days: 14,
+            detail: false,
+            verify_openssl: false,
+            remote_checks: std::collections::HashMap::new(),
+        };
+        let result = display_certificate_tree(&certs, &options);
         assert!(result.is_ok());
     }
 
@@ -4508,7 +4549,13 @@ IP.1 = 127.0.0.1
             serial: String::new(),
             key_algorithm: None,
         }];
-        let result = display_certificate_tree(&certs, 14, false, false);
+        let options = DisplayOptions {
+            expiration_alert_days: 14,
+            detail: false,
+            verify_openssl: false,
+            remote_checks: std::collections::HashMap::new(),
+        };
+        let result = display_certificate_tree(&certs, &options);
         assert!(result.is_ok());
     }
 
@@ -4563,7 +4610,13 @@ IP.1 = 127.0.0.1
                 key_algorithm: None,
             },
         ];
-        let result = display_certificate_tree(&certs, 14, false, false);
+        let options = DisplayOptions {
+            expiration_alert_days: 14,
+            detail: false,
+            verify_openssl: false,
+            remote_checks: std::collections::HashMap::new(),
+        };
+        let result = display_certificate_tree(&certs, &options);
         assert!(result.is_ok());
     }
 
@@ -4584,7 +4637,13 @@ IP.1 = 127.0.0.1
             serial: String::new(),
             key_algorithm: None,
         }];
-        let result = display_certificate_tree(&certs, 14, false, false);
+        let options = DisplayOptions {
+            expiration_alert_days: 14,
+            detail: false,
+            verify_openssl: false,
+            remote_checks: std::collections::HashMap::new(),
+        };
+        let result = display_certificate_tree(&certs, &options);
         assert!(result.is_ok());
     }
 
@@ -5537,7 +5596,19 @@ DNS.3=foo.bar.com
         let temp_dir = TempDir::new().unwrap();
         let context = temp_dir.path();
 
-        let result = list_certificates(context, false, 14, false, false, false, false).await;
+        let result = list_certificates(
+            context,
+            CheckOptions {
+                renew: false,
+                expiration_alert_days: 14,
+                detail: false,
+                auto_fix: false,
+                yes: false,
+                verify_openssl: false,
+                check_remote: false,
+            },
+        )
+        .await;
         assert!(result.is_ok());
     }
 

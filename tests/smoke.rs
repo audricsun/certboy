@@ -337,8 +337,19 @@ async fn test_list_certificates() {
     assert!(cert_res.is_ok());
 
     // List certificates (check mode without renew)
-    let list_result =
-        utils::list_certificates(&temp_dir_path, false, 14, false, false, false, false).await;
+    let list_result = utils::list_certificates(
+        &temp_dir_path,
+        utils::CheckOptions {
+            renew: false,
+            expiration_alert_days: 14,
+            detail: false,
+            auto_fix: false,
+            yes: false,
+            verify_openssl: false,
+            check_remote: false,
+        },
+    )
+    .await;
     if let Err(ref e) = list_result {
         tracing::error!("test_list_certificates failed: {e:?}");
     }
@@ -465,8 +476,19 @@ async fn test_list_certificates_with_ica() {
     assert!(cert2_res.is_ok());
 
     // List all certificates
-    let list_result =
-        utils::list_certificates(&temp_dir_path, false, 14, false, false, false, false).await;
+    let list_result = utils::list_certificates(
+        &temp_dir_path,
+        utils::CheckOptions {
+            renew: false,
+            expiration_alert_days: 14,
+            detail: false,
+            auto_fix: false,
+            yes: false,
+            verify_openssl: false,
+            check_remote: false,
+        },
+    )
+    .await;
     assert!(list_result.is_ok());
 
     drop(tmp);
@@ -844,13 +866,35 @@ async fn test_list_certificates_with_fullchain_check() {
     assert!(cert2_res.is_ok());
 
     // List certificates with fullchain check (fix_fullchain=false)
-    let list_result =
-        utils::list_certificates(&temp_dir_path, false, 14, false, false, false, false).await;
+    let list_result = utils::list_certificates(
+        &temp_dir_path,
+        utils::CheckOptions {
+            renew: false,
+            expiration_alert_days: 14,
+            detail: false,
+            auto_fix: false,
+            yes: false,
+            verify_openssl: false,
+            check_remote: false,
+        },
+    )
+    .await;
     assert!(list_result.is_ok());
 
     // List certificates with fullchain check (auto_fix=true)
-    let list_result2 =
-        utils::list_certificates(&temp_dir_path, false, 14, true, false, false, false).await;
+    let list_result2 = utils::list_certificates(
+        &temp_dir_path,
+        utils::CheckOptions {
+            renew: false,
+            expiration_alert_days: 14,
+            detail: false,
+            auto_fix: true,
+            yes: false,
+            verify_openssl: false,
+            check_remote: false,
+        },
+    )
+    .await;
     assert!(list_result2.is_ok());
 
     drop(tmp);
@@ -1301,8 +1345,19 @@ async fn test_list_certificates_ica_signed() {
     .await;
     assert!(cert_res.is_ok());
 
-    let list_result =
-        utils::list_certificates(&temp_dir_path, false, 14, false, false, false, false).await;
+    let list_result = utils::list_certificates(
+        &temp_dir_path,
+        utils::CheckOptions {
+            renew: false,
+            expiration_alert_days: 14,
+            detail: false,
+            auto_fix: false,
+            yes: false,
+            verify_openssl: false,
+            check_remote: false,
+        },
+    )
+    .await;
     assert!(list_result.is_ok());
 
     drop(tmp);
@@ -1340,8 +1395,19 @@ async fn test_list_certificates_with_renew() {
     .await;
     assert!(cert_res.is_ok());
 
-    let list_result =
-        utils::list_certificates(&temp_dir_path, true, 14, false, false, false, false).await;
+    let list_result = utils::list_certificates(
+        &temp_dir_path,
+        utils::CheckOptions {
+            renew: true,
+            expiration_alert_days: 14,
+            detail: false,
+            auto_fix: false,
+            yes: false,
+            verify_openssl: false,
+            check_remote: false,
+        },
+    )
+    .await;
     assert!(list_result.is_ok());
 
     drop(tmp);
@@ -1390,8 +1456,19 @@ async fn test_list_certificates_ica_chain() {
     .await;
     assert!(cert_res.is_ok());
 
-    let list_result =
-        utils::list_certificates(&temp_dir_path, false, 14, false, false, false, false).await;
+    let list_result = utils::list_certificates(
+        &temp_dir_path,
+        utils::CheckOptions {
+            renew: false,
+            expiration_alert_days: 14,
+            detail: false,
+            auto_fix: false,
+            yes: false,
+            verify_openssl: false,
+            check_remote: false,
+        },
+    )
+    .await;
     assert!(list_result.is_ok());
 
     drop(tmp);
@@ -1429,8 +1506,19 @@ async fn test_list_certificates_custom_expiration_alert() {
     .await;
     assert!(cert_res.is_ok());
 
-    let list_result =
-        utils::list_certificates(&temp_dir_path, false, 30, false, false, false, false).await;
+    let list_result = utils::list_certificates(
+        &temp_dir_path,
+        utils::CheckOptions {
+            renew: false,
+            expiration_alert_days: 30,
+            detail: false,
+            auto_fix: false,
+            yes: false,
+            verify_openssl: false,
+            check_remote: false,
+        },
+    )
+    .await;
     assert!(list_result.is_ok());
 
     drop(tmp);
@@ -1445,8 +1533,19 @@ async fn test_check_with_empty_context() {
 
     fs::create_dir_all(&temp_dir_path).unwrap();
 
-    let list_result =
-        utils::list_certificates(&temp_dir_path, false, 14, false, false, false, false).await;
+    let list_result = utils::list_certificates(
+        &temp_dir_path,
+        utils::CheckOptions {
+            renew: false,
+            expiration_alert_days: 14,
+            detail: false,
+            auto_fix: false,
+            yes: false,
+            verify_openssl: false,
+            check_remote: false,
+        },
+    )
+    .await;
     assert!(list_result.is_ok());
 
     drop(tmp);
