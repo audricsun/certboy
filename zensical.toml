@@ -1,0 +1,23 @@
+[project]
+site_name = "Certboy"
+site_url = "https://audricsun.github.io/certboy"
+site_description = "Unified certificate management tool - Create Root CAs, Intermediate CAs, and server certificates"
+docs_dir = "docs"
+site_dir = "site"
+dev_addr = "localhost:8000"
+
+[project.theme]
+features = [
+    "navigation.sections",
+    "navigation.expand",
+    "navigation.path",
+    "navigation.top",
+    "toc.integrate",
+    "toc.follow",
+]
+
+nav = [
+    { "Home" = "index.md" },
+    { "Get Started" = "get-started.md" },
+    { "User Guides" = "user-guides.md" },
+]

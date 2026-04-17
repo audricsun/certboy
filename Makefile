@@ -5,7 +5,7 @@ BINDIR ?= $(PREFIX)/bin
 AUDIT_DB_DIR ?= target/advisory-db
 
 .PHONY: all build check clean bump help check-deps test coverage clippy audit
-.PHONY: release install musl musl-setup install-musl changelog
+.PHONY: release install musl musl-setup install-musl changelog doc-dev
 
 .PHONY: all build check clean bump help check-deps test
 .PHONY: release install musl musl-setup install-musl changelog coverage
@@ -61,6 +61,9 @@ clean: ## Clean the project
 
 changelog: ## Generate CHANGELOG.md using git-cliff
 	git-cliff -o CHANGELOG.md
+
+doc-dev: ## Serve documentation with live reload
+	zensical serve
 
 install: ## Install the project using cargo
 	cargo install --path . --force

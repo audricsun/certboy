@@ -1,8 +1,3 @@
----
-layout: default
-title: Certboy - Unified Certificate Management
----
-
 # Certboy
 
 Certboy is a Rust CLI for managing a local PKI (Public Key Infrastructure):
@@ -22,9 +17,9 @@ Certboy is a Rust CLI for managing a local PKI (Public Key Infrastructure):
 
 ## Quick Links
 
-- [Get Started]({% link get-started.md %}) - Installation and quickstart guide
-- [User Guides]({% link user-guides/index.md %}) - Detailed guides for each feature
-- [CLI Reference]({% link reference/index.md %}) - Complete command reference
+- [Get Started](get-started.md) - Installation and quickstart guide
+- [User Guides](user-guides/index.md) - Detailed guides for each feature
+- [CLI Reference](reference/index.md) - Complete command reference
 
 ## Disclaimer
 
