@@ -8,7 +8,7 @@ dev_addr = "localhost:8000"
 repo_url = "https://github.com/audricsun/certboy"
 
 [project.extra]
-icon = "assets/images/favicon.png"
+icon = "images/favicon.png"
 icon_alpha = true
 
 [project.theme]
@@ -26,4 +26,3 @@ nav = [
   { "Get Started" = "get-started.md" },
   { "User Guides" = "user-guides.md" },
 ]
-
