@@ -1,6 +1,6 @@
 # certboy
 
-<div align="center"><img src="docs/images/logo.png" width="250"></div>
+<div align="left"><img src="docs/images/logo.png" width="400"></div>
 
 Certboy is a Rust CLI for managing a local PKI:
 
