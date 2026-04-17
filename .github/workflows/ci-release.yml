@@ -1,10 +1,14 @@
 name: CI Release
 
-# Only runs on pushes to main — handles VERSION-gated release flow
+# Runs after build.yml completes on main branch push (for releases)
+# Also runs on pull_request to check VERSION bump permissions
 on:
-  push:
-    branches:
-      - main
+  workflow_run:
+    workflows: ["CI Build"]
+    types: [completed]
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -20,14 +24,25 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version_changed: ${{ steps.changes.outputs.version_changed }}
+      proceed: ${{ steps.checks.outputs.proceed }}
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
           token: ${{ secrets.GH_PAT }}
 
+      - name: Check if from build.yml workflow
+        id: checks
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Detect VERSION change
         id: changes
+        if: github.event_name != 'pull_request'
         shell: bash
         run: |
           set -euo pipefail
@@ -67,7 +82,7 @@ jobs:
           esac
 
       - name: Auto bump build version
-        if: steps.changes.outputs.version_changed != 'true'
+        if: github.event_name != 'pull_request' && steps.changes.outputs.version_changed != 'true'
         env:
           GH_TOKEN: ${{ secrets.GH_PAT }}
         shell: bash
@@ -87,216 +102,10 @@ jobs:
           fi
           git push origin main
 
-  build:
-    name: build (release)
-    runs-on: ubuntu-latest
-    needs: [pre-checks]
-    if: needs.pre-checks.outputs.version_changed == 'true'
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          token: ${{ secrets.GH_PAT }}
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Cache crates.io index
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/registry/index
-          key: crates-io-index-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: crates-io-index-${{ runner.os }}-
-      - name: Cache cargo install tools
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/bin
-          key: cargo-install-tools-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: cargo-install-tools-${{ runner.os }}-
-      - name: Cache cargo registry
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/registry
-          key: cargo-registry-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: cargo-registry-${{ runner.os }}-
-      - uses: Swatinem/rust-cache@v2
-      - run: echo "VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
-      - run: cargo build --release
-      - run: mv target/release/certboy "certboy-${VERSION}-x86_64-unknown-linux-gnu"
-      - run: cp VERSION STABLE.txt
-      - uses: actions/upload-artifact@v4
-        with:
-          name: certboy-${{ env.VERSION }}-gnu
-          path: |
-            certboy-${{ env.VERSION }}-x86_64-unknown-linux-gnu
-            STABLE.txt
-
-  build-musl:
-    name: build (x86_64-unknown-linux-musl)
-    runs-on: ubuntu-latest
-    needs: [pre-checks]
-    if: needs.pre-checks.outputs.version_changed == 'true'
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          token: ${{ secrets.GH_PAT }}
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Cache crates.io index
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/registry/index
-          key: crates-io-index-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: crates-io-index-${{ runner.os }}-
-      - name: Cache cargo install tools
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/bin
-          key: cargo-install-tools-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: cargo-install-tools-${{ runner.os }}-
-      - name: Cache cargo registry
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/registry
-          key: cargo-registry-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: cargo-registry-${{ runner.os }}-
-      - uses: Swatinem/rust-cache@v2
-      - run: sudo apt-get update -qq && sudo apt-get install -y -qq musl-tools
-      - run: rustup target add x86_64-unknown-linux-musl
-      - run: echo "VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
-      - run: cargo build --release --target x86_64-unknown-linux-musl
-      - run: mv target/x86_64-unknown-linux-musl/release/certboy "certboy-${VERSION}-x86_64-unknown-linux-musl"
-      - run: cp VERSION STABLE.txt
-      - uses: actions/upload-artifact@v4
-        with:
-          name: certboy-${{ env.VERSION }}-musl
-          path: |
-            certboy-${{ env.VERSION }}-x86_64-unknown-linux-musl
-            STABLE.txt
-
-  build-darwin:
-    name: build (aarch64-apple-darwin)
-    runs-on: macos-latest
-    needs: [pre-checks]
-    if: needs.pre-checks.outputs.version_changed == 'true'
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          token: ${{ secrets.GH_PAT }}
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Cache crates.io index
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/registry/index
-          key: crates-io-index-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: crates-io-index-${{ runner.os }}-
-      - name: Cache cargo install tools
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/bin
-          key: cargo-install-tools-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: cargo-install-tools-${{ runner.os }}-
-      - name: Cache cargo registry
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/registry
-          key: cargo-registry-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: cargo-registry-${{ runner.os }}-
-      - uses: Swatinem/rust-cache@v2
-      - run: rustup target add aarch64-apple-darwin
-      - run: echo "VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
-      - run: cargo build --release --target aarch64-apple-darwin
-      - run: mv target/aarch64-apple-darwin/release/certboy "certboy-${VERSION}-aarch64-apple-darwin"
-      - run: cp VERSION STABLE.txt
-      - uses: actions/upload-artifact@v4
-        with:
-          name: certboy-${{ env.VERSION }}-darwin
-          path: |
-            certboy-${{ env.VERSION }}-aarch64-apple-darwin
-            STABLE.txt
-
-  build-arm-linux:
-    name: build (aarch64-unknown-linux-gnu)
-    runs-on: ubuntu-latest
-    needs: [pre-checks]
-    if: needs.pre-checks.outputs.version_changed == 'true'
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          token: ${{ secrets.GH_PAT }}
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Cache crates.io index
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/registry/index
-          key: crates-io-index-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: crates-io-index-${{ runner.os }}-
-      - name: Cache cargo install tools
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/bin
-          key: cargo-install-tools-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: cargo-install-tools-${{ runner.os }}-
-      - name: Cache cargo registry
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/registry
-          key: cargo-registry-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: cargo-registry-${{ runner.os }}-
-      - uses: Swatinem/rust-cache@v2
-      - run: rustup target add aarch64-unknown-linux-gnu
-      - run: echo "VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
-      - run: cargo build --release --target aarch64-unknown-linux-gnu
-      - run: mv target/aarch64-unknown-linux-gnu/release/certboy "certboy-${VERSION}-aarch64-unknown-linux-gnu"
-      - run: cp VERSION STABLE.txt
-      - uses: actions/upload-artifact@v4
-        with:
-          name: certboy-${{ env.VERSION }}-arm-gnu
-          path: |
-            certboy-${{ env.VERSION }}-aarch64-unknown-linux-gnu
-            STABLE.txt
-
-  build-arm-linux-musl:
-    name: build (aarch64-unknown-linux-musl)
-    runs-on: ubuntu-latest
-    needs: [pre-checks]
-    if: needs.pre-checks.outputs.version_changed == 'true'
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          token: ${{ secrets.GH_PAT }}
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Cache crates.io index
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/registry/index
-          key: crates-io-index-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: crates-io-index-${{ runner.os }}-
-      - name: Cache cargo install tools
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/bin
-          key: cargo-install-tools-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: cargo-install-tools-${{ runner.os }}-
-      - name: Cache cargo registry
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/registry
-          key: cargo-registry-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: cargo-registry-${{ runner.os }}-
-      - uses: Swatinem/rust-cache@v2
-      - run: sudo apt-get update -qq && sudo apt-get install -y -qq musl-tools
-      - run: rustup target add aarch64-unknown-linux-musl
-      - run: echo "VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
-      - run: cargo build --release --target aarch64-unknown-linux-musl
-      - run: mv target/aarch64-unknown-linux-musl/release/certboy "certboy-${VERSION}-aarch64-unknown-linux-musl"
-      - run: cp VERSION STABLE.txt
-      - uses: actions/upload-artifact@v4
-        with:
-          name: certboy-${{ env.VERSION }}-arm-musl
-          path: |
-            certboy-${{ env.VERSION }}-aarch64-unknown-linux-musl
-            STABLE.txt
-
   release:
     name: GitHub Release & Crates.io Publish
     runs-on: ubuntu-latest
-    needs: [pre-checks, build, build-musl, build-darwin, build-arm-linux, build-arm-linux-musl]
+    needs: [pre-checks]
     if: needs.pre-checks.outputs.version_changed == 'true'
     permissions:
       contents: write
@@ -306,11 +115,13 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GH_PAT }}
 
-      - name: Download artifacts
+      - name: Download artifacts from build.yml
         uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Tag and GitHub release
         env:
@@ -344,9 +155,7 @@ jobs:
             git push origin "$tag"
           fi
 
-          # Generate changelog for this release via git-cliff
           pip install --quiet git-cliff
-          # Use --current to process commits belonging to the current tag (the one just pushed)
           if git-cliff --current --output /tmp/cliff_notes.md 2>&1; then
             echo "Generated changelog via git-cliff for current tag"
           else

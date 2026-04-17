@@ -11,38 +11,13 @@ Download the latest release from [GitHub Releases](https://github.com/audricsun/
 **One-liner installation (Linux x86_64):**
 
 ```bash
-VERSION=$(curl -sL https://github.com/audricsun/certboy/releases/download/latest/stable.txt) && \
+VERSION=$(curl -sL https://github.com/audricsun/certboy/releases/download/latest/STABLE.txt) && \
 curl -sL "https://github.com/audricsun/certboy/releases/download/v${VERSION}/certboy-${VERSION}-x86_64-unknown-linux-musl.tar.gz" | tar xz && \
 chmod +x certboy && \
 sudo mv certboy /usr/local/bin/
 ```
 
-**One-liner installation (Linux ARM64):**
-
-```bash
-VERSION=$(curl -sL https://github.com/audricsun/certboy/releases/download/latest/stable.txt) && \
-curl -sL "https://github.com/audricsun/certboy/releases/download/v${VERSION}/certboy-${VERSION}-aarch64-unknown-linux-musl.tar.gz" | tar xz && \
-chmod +x certboy && \
-sudo mv certboy /usr/local/bin/
-```
-
-**One-liner installation (macOS Intel):**
-
-```bash
-VERSION=$(curl -sL https://github.com/audricsun/certboy/releases/download/latest/stable.txt) && \
-curl -sL "https://github.com/audricsun/certboy/releases/download/v${VERSION}/certboy-${VERSION}-x86_64-apple-darwin.tar.gz" | tar xz && \
-chmod +x certboy && \
-sudo mv certboy /usr/local/bin/
-```
-
-**One-liner installation (macOS Apple Silicon):**
-
-```bash
-VERSION=$(curl -sL https://github.com/audricsun/certboy/releases/download/latest/stable.txt) && \
-curl -sL "https://github.com/audricsun/certboy/releases/download/v${VERSION}/certboy-${VERSION}-aarch64-apple-darwin.tar.gz" | tar xz && \
-chmod +x certboy && \
-sudo mv certboy /usr/local/bin/
-```
+For other architectures (Linux ARM64, macOS Intel, macOS Apple Silicon), see the [GitHub Releases](https://github.com/audricsun/certboy/releases) page.
 
 ### Install with Cargo
 
