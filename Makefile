@@ -17,11 +17,11 @@ test: ## Run tests with coverage (same as CI)
 	@echo "=== Checking test dependencies ==="
 	@if ! command -v cargo-nextest >/dev/null 2>&1; then \
 		echo "cargo-nextest is not installed; installing..."; \
-		cargo install cargo-nextest; \
+		cargo install cargo-nextest --locked; \
 	fi
 	@if ! command -v cargo-llvm-cov >/dev/null 2>&1; then \
 		echo "cargo-llvm-cov is not installed; installing..."; \
-		cargo install cargo-llvm-cov; \
+		cargo install cargo-llvm-cov --locked; \
 	fi
 	@echo "=== Running tests with nextest and coverage ==="
 	cargo llvm-cov nextest --profile ci --test-threads=1

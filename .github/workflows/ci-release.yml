@@ -1,7 +1,9 @@
 name: CI Release
 
-# Only runs on pushes to main — handles VERSION-gated release flow
+# Runs on PRs for build verification, and on main for releases
 on:
+  pull_request:
+    types: [opened, synchronize, reopened]
   push:
     branches:
       - main
@@ -220,6 +222,8 @@ jobs:
         with:
           token: ${{ secrets.GH_PAT }}
       - uses: dtolnay/rust-toolchain@stable
+      - name: Install cross-compilation toolchain
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq gcc-aarch64-linux-gnu
       - name: Cache crates.io index
         uses: actions/cache@v4
         with:
@@ -261,6 +265,8 @@ jobs:
         with:
           token: ${{ secrets.GH_PAT }}
       - uses: dtolnay/rust-toolchain@stable
+      - name: Install cross-compilation toolchain
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq musl-tools gcc-aarch64-linux-musl
       - name: Cache crates.io index
         uses: actions/cache@v4
         with:
@@ -280,7 +286,6 @@ jobs:
           key: cargo-registry-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: cargo-registry-${{ runner.os }}-
       - uses: Swatinem/rust-cache@v2
-      - run: sudo apt-get update -qq && sudo apt-get install -y -qq musl-tools
       - run: rustup target add aarch64-unknown-linux-musl
       - run: echo "VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
       - run: cargo build --release --target aarch64-unknown-linux-musl
