@@ -5,6 +5,7 @@ site_description = "Unified certificate management tool - Create Root CAs, Inter
 docs_dir = "docs"
 site_dir = "site"
 dev_addr = "localhost:8000"
+repo_url = "https://github.com/audricsun/certboy"
 
 [project.extra]
 icon = "assets/images/favicon.png"
