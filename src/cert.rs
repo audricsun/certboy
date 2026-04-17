@@ -10,18 +10,153 @@ use openssl::x509::extension::{
     AuthorityKeyIdentifier, BasicConstraints, ExtendedKeyUsage, KeyUsage, SubjectAlternativeName,
     SubjectKeyIdentifier,
 };
-use openssl::x509::{X509Builder, X509NameBuilder, X509ReqBuilder, X509};
+use openssl::x509::{X509Builder, X509ReqBuilder, X509};
 use tracing::debug;
 
 use crate::utils::{
-    create_metadata_from_cert, generate_default_ext_content, generate_random_password,
-    generate_unique_serial, get_from_global_metadata, git_add_and_commit, has_metadata,
-    parse_alt_names_from_ext, read_file, read_metadata, update_global_metadata, write_file,
-    CertType, KeyAlgorithm,
+    build_x509_name, create_metadata_from_cert, generate_default_ext_content,
+    generate_random_password, generate_unique_serial, get_from_global_metadata, git_add_and_commit,
+    has_metadata, parse_alt_names_from_ext, read_file, read_metadata, update_global_metadata,
+    write_file, CertificateType, KeyAlgorithm,
 };
 use openssl::pkcs12::Pkcs12;
 use std::fs;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
+
+struct CaContext<'a> {
+    cert_pem: &'a [u8],
+    key_pem: &'a [u8],
+    password: &'a str,
+}
+
+struct KeyEncryption {
+    encrypt: bool,
+    password: String,
+}
+
+struct CertResult {
+    key_pem: Vec<u8>,
+    csr_pem: Vec<u8>,
+    cert_pem: Vec<u8>,
+    p12_bytes: Vec<u8>,
+    p12_password: String,
+}
+
+fn generate_cert_objects(
+    domain: &str,
+    key_algorithm: KeyAlgorithm,
+    expiration_days: Option<u32>,
+    key_enc: KeyEncryption,
+    serial_bytes: &[u8],
+    altnames: &[String],
+    ca: CaContext<'_>,
+) -> Result<CertResult> {
+    let pkey = match key_algorithm {
+        KeyAlgorithm::Rsa => {
+            debug!("Generating 2048-bit RSA private key");
+            let rsa = Rsa::generate(2048)?;
+            PKey::from_rsa(rsa)?
+        }
+        KeyAlgorithm::EcdsaP256 => {
+            debug!("Generating ECDSA P-256 private key");
+            let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1)?;
+            let ec_key = EcKey::generate(&group)?;
+            PKey::from_ec_key(ec_key)?
+        }
+    };
+
+    let key_pem = if key_enc.encrypt {
+        let cipher = Cipher::aes_256_cbc();
+        pkey.private_key_to_pem_pkcs8_passphrase(cipher, key_enc.password.as_bytes())?
+    } else {
+        pkey.private_key_to_pem_pkcs8()?
+    };
+
+    let name = build_x509_name("CN", "CN", domain)?;
+
+    let mut req_builder = X509ReqBuilder::new()?;
+    req_builder.set_subject_name(&name)?;
+    req_builder.set_pubkey(&pkey)?;
+    req_builder.sign(&pkey, MessageDigest::sha256())?;
+    let csr = req_builder.build();
+    let csr_pem = csr.to_pem()?;
+
+    let ca_cert = X509::from_pem(ca.cert_pem)?;
+    let ca_key = PKey::private_key_from_pem_passphrase(ca.key_pem, ca.password.trim().as_bytes())?;
+
+    let mut builder = X509Builder::new()?;
+    builder.set_version(2)?;
+    builder.set_subject_name(&name)?;
+    builder.set_issuer_name(ca_cert.subject_name())?;
+    builder.set_pubkey(&pkey)?;
+    let not_before = Asn1Time::days_from_now(0)?;
+    let days = expiration_days.unwrap_or(1095);
+    let not_after = Asn1Time::days_from_now(days)?;
+    builder.set_not_before(&not_before)?;
+    builder.set_not_after(&not_after)?;
+
+    let basic_constraints = BasicConstraints::new().critical().build()?;
+    builder.append_extension(basic_constraints)?;
+
+    let key_usage = KeyUsage::new()
+        .critical()
+        .digital_signature()
+        .key_encipherment()
+        .build()?;
+    builder.append_extension(key_usage)?;
+
+    let extended_key_usage = ExtendedKeyUsage::new().server_auth().build()?;
+    builder.append_extension(extended_key_usage)?;
+
+    let subject_key_id =
+        SubjectKeyIdentifier::new().build(&builder.x509v3_context(Some(&ca_cert), None))?;
+    builder.append_extension(subject_key_id)?;
+
+    let authority_key_id = AuthorityKeyIdentifier::new()
+        .keyid(true)
+        .build(&builder.x509v3_context(Some(&ca_cert), None))?;
+    builder.append_extension(authority_key_id)?;
+
+    let mut san_builder = SubjectAlternativeName::new();
+    san_builder.dns(domain);
+    for altname in altnames {
+        if altname == domain {
+            continue;
+        }
+        if let Ok(ip) = altname.parse::<std::net::IpAddr>() {
+            san_builder.ip(&ip.to_string());
+        } else {
+            san_builder.dns(altname);
+        }
+    }
+    let subject_alt_name = san_builder.build(&builder.x509v3_context(Some(&ca_cert), None))?;
+    builder.append_extension(subject_alt_name)?;
+
+    let bn = openssl::bn::BigNum::from_slice(serial_bytes)?;
+    let serial_asn1 = openssl::asn1::Asn1Integer::from_bn(&bn)?;
+    builder.set_serial_number(&serial_asn1)?;
+    builder.sign(&ca_key, MessageDigest::sha256())?;
+    let cert = builder.build();
+    let cert_pem = cert.to_pem()?;
+
+    let p12_password = generate_random_password()?;
+    let p12 = Pkcs12::builder()
+        .name(domain)
+        .pkey(&pkey)
+        .cert(&cert)
+        .build2(&p12_password)?;
+    let p12_bytes = p12.to_der()?;
+
+    Ok(CertResult {
+        key_pem,
+        csr_pem,
+        cert_pem,
+        p12_bytes,
+        p12_password,
+    })
+}
 
 pub async fn sign_cert(
     context: &Path,
@@ -99,11 +234,11 @@ pub async fn sign_cert(
     if has_metadata(&ca_dir) {
         if let Ok(meta) = read_metadata(&ca_dir) {
             match meta.cert_type {
-                CertType::Ica => {
+                CertificateType::Ica => {
                     _ca_type = "ica";
                     debug!("Detected ICA as signing CA: {}", meta.domain);
                 }
-                CertType::RootCa => {
+                CertificateType::RootCa => {
                     _ca_type = "root";
                     debug!("Detected Root CA as signing CA: {}", meta.domain);
                 }
@@ -163,6 +298,12 @@ pub async fn sign_cert(
     // Generate password
     let password = generate_random_password()?;
     write_file(&cert_pass, &password)?;
+    #[cfg(unix)]
+    {
+        let mut perms = fs::metadata(&cert_pass)?.permissions();
+        perms.set_mode(0o600);
+        fs::set_permissions(&cert_pass, perms)?;
+    }
 
     let ca_cert_pem_for_algo = fs::read(&ca_crt)?;
     let ca_cert_for_algo = X509::from_pem(&ca_cert_pem_for_algo)?;
@@ -177,135 +318,66 @@ pub async fn sign_cert(
         })
         .unwrap_or(KeyAlgorithm::EcdsaP256);
 
-    let pkey = match key_algorithm {
-        KeyAlgorithm::Rsa => {
-            debug!("Generating 2048-bit RSA private key");
-            let rsa = Rsa::generate(2048)?;
-            PKey::from_rsa(rsa)?
-        }
-        KeyAlgorithm::EcdsaP256 => {
-            debug!("Generating ECDSA P-256 private key");
-            let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1)?;
-            let ec_key = EcKey::generate(&group)?;
-            PKey::from_ec_key(ec_key)?
-        }
-    };
-    let key_pem = if encrypt_key {
-        let cipher = Cipher::aes_256_cbc();
-        pkey.private_key_to_pem_pkcs8_passphrase(cipher, password.as_bytes())?
-    } else {
-        pkey.private_key_to_pem_pkcs8()?
-    };
-    fs::write(&cert_key, &key_pem)?;
-
-    // Build certificate X509 Name
-    let mut name_builder = X509NameBuilder::new()?;
-    name_builder.append_entry_by_nid(Nid::COUNTRYNAME, "CN")?;
-    name_builder.append_entry_by_nid(Nid::COMMONNAME, domain)?;
-    let name = name_builder.build();
-
-    // Build CSR
-    let mut req_builder = X509ReqBuilder::new()?;
-    req_builder.set_subject_name(&name)?;
-    req_builder.set_pubkey(&pkey)?;
-    req_builder.sign(&pkey, MessageDigest::sha256())?;
-    let csr = req_builder.build();
-    let csr_pem = csr.to_pem()?;
-    fs::write(&cert_csr, &csr_pem)?;
-
-    // Load CA cert and key
     let ca_cert_pem = fs::read(&ca_crt)?;
     let ca_key_pem = fs::read(&ca_key)?;
     let ca_pass_content = fs::read_to_string(&ca_pass)?;
-    let ca_cert = X509::from_pem(&ca_cert_pem)?;
-    let ca_key =
-        PKey::private_key_from_pem_passphrase(&ca_key_pem, ca_pass_content.trim().as_bytes())?;
+    let serial = generate_unique_serial(context)?;
+    let serial_bytes = serial.to_bn()?.to_vec();
 
-    // Create or read ext.cnf file
     let ext_content = if cert_ext.exists() {
         read_file(&cert_ext)?
     } else {
         generate_default_ext_content(domain)
     };
-
-    // Parse alt names from ext.cnf or command line
     let parsed_altnames = parse_alt_names_from_ext(&ext_content)?;
     let final_altnames = if let Some(cmd_altnames) = altnames {
         cmd_altnames.to_vec()
     } else {
         parsed_altnames
     };
-
-    // Update ext.cnf with all alt names
     let updated_ext_content = generate_ext_content_with_altnames(domain, &final_altnames);
     write_file(&cert_ext, &updated_ext_content)?;
 
-    // Build certificate
-    let mut builder = X509Builder::new()?;
-    builder.set_version(2)?;
-    builder.set_subject_name(&name)?;
-    builder.set_issuer_name(ca_cert.subject_name())?;
-    builder.set_pubkey(&pkey)?;
-    let not_before = Asn1Time::days_from_now(0)?;
-    let days = expiration_days.unwrap_or(1095); // Default 3 years
-    let not_after = Asn1Time::days_from_now(days)?;
-    builder.set_not_before(&not_before)?;
-    builder.set_not_after(&not_after)?;
-
-    // Add extensions
-    let basic_constraints = BasicConstraints::new().critical().build()?;
-    builder.append_extension(basic_constraints)?;
-
-    let key_usage = KeyUsage::new()
-        .critical()
-        .digital_signature()
-        .key_encipherment()
-        .build()?;
-    builder.append_extension(key_usage)?;
-
-    let extended_key_usage = ExtendedKeyUsage::new().server_auth().build()?;
-    builder.append_extension(extended_key_usage)?;
-
-    let subject_key_id =
-        SubjectKeyIdentifier::new().build(&builder.x509v3_context(Some(&ca_cert), None))?;
-    builder.append_extension(subject_key_id)?;
-
-    let authority_key_id = AuthorityKeyIdentifier::new()
-        .keyid(true)
-        .build(&builder.x509v3_context(Some(&ca_cert), None))?;
-    builder.append_extension(authority_key_id)?;
-
-    // Add Subject Alternative Names if present
-    // Note: we need to add domain explicitly since final_altnames may contain it
-    let mut san_builder = SubjectAlternativeName::new();
-    san_builder.dns(domain);
-    for altname in &final_altnames {
-        // Skip if same as main domain (already added)
-        if altname == domain {
-            continue;
+    let result = tokio::task::spawn_blocking({
+        let domain = domain.to_string();
+        let ca_cert_pem = ca_cert_pem.clone();
+        let ca_key_pem = ca_key_pem.clone();
+        let ca_pass_content = ca_pass_content.clone();
+        let serial_bytes = serial_bytes.clone();
+        let final_altnames = final_altnames.clone();
+        move || {
+            generate_cert_objects(
+                &domain,
+                key_algorithm,
+                expiration_days,
+                KeyEncryption {
+                    encrypt: encrypt_key,
+                    password: password.clone(),
+                },
+                &serial_bytes,
+                &final_altnames,
+                CaContext {
+                    cert_pem: &ca_cert_pem,
+                    key_pem: &ca_key_pem,
+                    password: &ca_pass_content,
+                },
+            )
         }
-        if let Ok(ip) = altname.parse::<std::net::IpAddr>() {
-            san_builder.ip(&ip.to_string());
-        } else {
-            san_builder.dns(altname);
-        }
+    })
+    .await??;
+
+    fs::write(&cert_key, &result.key_pem)?;
+    #[cfg(unix)]
+    {
+        let mut perms = fs::metadata(&cert_key)?.permissions();
+        perms.set_mode(0o600);
+        fs::set_permissions(&cert_key, perms)?;
     }
-    let subject_alt_name = san_builder.build(&builder.x509v3_context(Some(&ca_cert), None))?;
-    builder.append_extension(subject_alt_name)?;
+    fs::write(&cert_csr, &result.csr_pem)?;
+    fs::write(&cert_crt, &result.cert_pem)?;
 
-    // Sign certificate with CA
-    let serial = generate_unique_serial(context)?;
-    builder.set_serial_number(&serial)?;
-    builder.sign(&ca_key, MessageDigest::sha256())?;
-    let cert = builder.build();
-    let cert_pem = cert.to_pem()?;
-    fs::write(&cert_crt, &cert_pem)?;
-
-    // Fullchain: only needed for ICA-signed certificates
-    // Contains: server cert + ICA cert (no root CA)
-    // This allows TLS clients to verify the chain without needing the root CA
     let fullchain_created = if _ca_type == "ica" {
-        let mut fullchain_content = cert_pem.clone();
+        let mut fullchain_content = result.cert_pem.clone();
         fullchain_content.extend_from_slice(&ca_cert_pem);
         fs::write(&cert_fullchain, &fullchain_content)?;
         true
@@ -313,20 +385,24 @@ pub async fn sign_cert(
         false
     };
 
-    // Generate P12 file
-    let p12_password = generate_random_password()?;
-    let p12 = Pkcs12::builder()
-        .name(domain)
-        .pkey(&pkey)
-        .cert(&cert)
-        .build2(&p12_password)?;
-    let p12_bytes = p12.to_der()?;
-    fs::write(&cert_p12, &p12_bytes)?;
-    write_file(&cert_dir.join("p12.pass"), &p12_password)?;
+    fs::write(&cert_p12, &result.p12_bytes)?;
+    let p12_pass_path = cert_dir.join("p12.pass");
+    write_file(&p12_pass_path, &result.p12_password)?;
+    #[cfg(unix)]
+    {
+        let mut perms = fs::metadata(&p12_pass_path)?.permissions();
+        perms.set_mode(0o600);
+        fs::set_permissions(&p12_pass_path, perms)?;
+    }
 
     // Write metadata for TLS certificate with parent (signing CA) reference
-    let mut metadata =
-        create_metadata_from_cert(&cert_dir, &cert, CertType::Tls, Some(ca_domain.to_string()))?;
+    let cert = X509::from_pem(&result.cert_pem)?;
+    let mut metadata = create_metadata_from_cert(
+        &cert_dir,
+        &cert,
+        CertificateType::Tls,
+        Some(ca_domain.to_string()),
+    )?;
     metadata.private_key_encrypted = Some(encrypt_key);
     metadata.private_key_password_file = Some("pass.key".to_string());
     metadata.key_algorithm = Some(key_algorithm);

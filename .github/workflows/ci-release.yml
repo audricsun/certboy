@@ -82,7 +82,7 @@ jobs:
           esac
 
       - name: Auto bump build version
-        if: github.event_name != 'pull_request' && steps.changes.outputs.version_changed != 'true'
+        if: github.event_name == 'push' && steps.changes.outputs.version_changed != 'true'
         env:
           GH_TOKEN: ${{ secrets.GH_PAT }}
         shell: bash

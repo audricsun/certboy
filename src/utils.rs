@@ -23,7 +23,7 @@ use walkdir::WalkDir;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CertMetadata {
     pub version: u32,
-    pub cert_type: CertType,
+    pub cert_type: CertificateType,
     pub domain: String,
     pub subject: String,
     pub issuer: String,
@@ -54,24 +54,6 @@ impl std::fmt::Display for KeyAlgorithm {
         match self {
             KeyAlgorithm::Rsa => write!(f, "rsa"),
             KeyAlgorithm::EcdsaP256 => write!(f, "ecdsa-p256"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "kebab-case")]
-pub enum CertType {
-    RootCa,
-    Ica,
-    Tls,
-}
-
-impl std::fmt::Display for CertType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            CertType::RootCa => write!(f, "root-ca"),
-            CertType::Ica => write!(f, "ica"),
-            CertType::Tls => write!(f, "tls"),
         }
     }
 }
@@ -225,18 +207,18 @@ fn search_intermediates(base: &Path, domain: &str) -> Option<PathBuf> {
 
 /// Find certificate path by domain and type
 /// Also does fallback detection if the type from metadata doesn't match actual location
-fn find_cert_path(context: &Path, domain: &str, cert_type: &CertType) -> Option<PathBuf> {
+fn find_cert_path(context: &Path, domain: &str, cert_type: &CertificateType) -> Option<PathBuf> {
     // First try based on the metadata type
     let p = match cert_type {
-        CertType::RootCa => {
+        CertificateType::RootCa => {
             let p = context.join(domain).join("crt.pem");
             if p.exists() {
                 return Some(p);
             }
             None
         }
-        CertType::Ica => find_nested_ica_path(context, domain),
-        CertType::Tls => {
+        CertificateType::Ica => find_nested_ica_path(context, domain),
+        CertificateType::Tls => {
             if let Ok(entries) = fs::read_dir(context) {
                 for entry in entries.flatten() {
                     let root_path = entry.path();
@@ -323,7 +305,7 @@ pub fn has_metadata(dir: &Path) -> bool {
 pub fn create_metadata_from_cert(
     dir: &Path,
     cert: &X509,
-    cert_type: CertType,
+    cert_type: CertificateType,
     parent: Option<String>,
 ) -> Result<CertMetadata> {
     let domain = dir
@@ -601,8 +583,8 @@ fn display_certificate_node(
 
     let cert_type_color = match cert.cert_type {
         CertificateType::RootCa => "Root CA".cyan(),
-        CertificateType::IntermediateCa => "ICA".magenta(),
-        CertificateType::ServerCert => "Server".blue(),
+        CertificateType::Ica => "ICA".magenta(),
+        CertificateType::Tls => "Server".blue(),
     };
 
     let days_color = if cert.expires_in_days < options.expiration_alert_days as i64 {
@@ -667,7 +649,7 @@ fn display_certificate_node(
         println!("{}⚠️  Needs renewal!", detail_prefix.white().bold());
     }
 
-    if options.verify_openssl && cert.cert_type == CertificateType::ServerCert {
+    if options.verify_openssl && cert.cert_type == CertificateType::Tls {
         let cert_dir = cert.path.parent().unwrap();
         match verify_key_cert_match(cert_dir) {
             Ok((is_valid, message)) => {
@@ -695,7 +677,7 @@ fn display_certificate_node(
     }
 
     if let Some(remote) = remote_check {
-        if cert.cert_type == CertificateType::ServerCert {
+        if cert.cert_type == CertificateType::Tls {
             // DNS stage
             if remote.dns_resolved {
                 println!(
@@ -820,7 +802,7 @@ fn display_certificate_tree(
                 // Root CA: top level
                 root_cas.push(cert.clone());
             }
-            CertificateType::IntermediateCa => {
+            CertificateType::Ica => {
                 // ICA: try metadata parent first, then path-based fallback
                 if let Some(parent) = &cert.parent {
                     icas_by_root
@@ -837,7 +819,7 @@ fn display_certificate_tree(
                     }
                 }
             }
-            CertificateType::ServerCert => {
+            CertificateType::Tls => {
                 // Server cert: try metadata parent first, then path-based fallback
                 if let Some(parent) = &cert.parent {
                     server_certs_by_ca
@@ -1007,6 +989,18 @@ pub fn file_exists(path: &Path) -> bool {
     path.exists()
 }
 
+pub fn build_x509_name(
+    country: &str,
+    organization: &str,
+    common_name: &str,
+) -> Result<openssl::x509::X509Name> {
+    let mut name_builder = openssl::x509::X509NameBuilder::new()?;
+    name_builder.append_entry_by_nid(openssl::nid::Nid::COUNTRYNAME, country)?;
+    name_builder.append_entry_by_nid(openssl::nid::Nid::ORGANIZATIONNAME, organization)?;
+    name_builder.append_entry_by_nid(openssl::nid::Nid::COMMONNAME, common_name)?;
+    Ok(name_builder.build())
+}
+
 pub fn generate_random_password() -> Result<String> {
     debug!("Generating random password");
     let mut bytes = [0u8; 32];
@@ -1017,7 +1011,7 @@ pub fn generate_random_password() -> Result<String> {
 }
 
 #[allow(dead_code)] // Public API
-pub fn check_certificate_expiry(cert_path: &Path) -> Result<bool> {
+pub fn cert_file_exists_and_non_empty(cert_path: &Path) -> Result<bool> {
     debug!("Checking certificate expiry: {:?}", cert_path);
 
     // For now, we'll just check if the file exists and is not empty
@@ -1134,7 +1128,7 @@ fn find_parent_ca_in_context(
     }
 
     // Collect all potential parent CAs (Root CA and ICAs)
-    let mut candidates: Vec<(String, PathBuf, CertType)> = Vec::new();
+    let mut candidates: Vec<(String, PathBuf, CertificateType)> = Vec::new();
 
     // Find Root CAs in context
     if let Ok(entries) = fs::read_dir(context) {
@@ -1145,7 +1139,11 @@ fn find_parent_ca_in_context(
                 if crt_path.exists() {
                     if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
                         if name != "intermediates.d" && name != "certificates.d" {
-                            candidates.push((name.to_string(), path.clone(), CertType::RootCa));
+                            candidates.push((
+                                name.to_string(),
+                                path.clone(),
+                                CertificateType::RootCa,
+                            ));
                         }
                     }
                 }
@@ -1163,7 +1161,7 @@ fn find_parent_ca_in_context(
                     let crt_path = path.join("crt.pem");
                     if crt_path.exists() {
                         if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                            candidates.push((name.to_string(), path.clone(), CertType::Ica));
+                            candidates.push((name.to_string(), path.clone(), CertificateType::Ica));
                         }
                     }
                 }
@@ -1190,7 +1188,7 @@ fn find_parent_ca_in_context(
                                         candidates.push((
                                             name.to_string(),
                                             ica_path.clone(),
-                                            CertType::Ica,
+                                            CertificateType::Ica,
                                         ));
                                     }
                                 }
@@ -1635,7 +1633,7 @@ pub async fn import_certificate(source: &Path, context: &Path) -> Result<()> {
     let (cert_type, parent, dest_dir) = if is_ca {
         // Self-signed = Root CA (regardless of import path)
         let dest = context.join(&domain);
-        (CertType::RootCa, None, dest)
+        (CertificateType::RootCa, None, dest)
     } else if is_under_intermediates || looks_like_ca_import {
         // Self-signed OR under intermediates.d OR importing from CAs dir = CA
         if is_under_intermediates || detected_parent.is_some() || looks_like_ca_import {
@@ -1647,14 +1645,14 @@ pub async fn import_certificate(source: &Path, context: &Path) -> Result<()> {
                 } else {
                     context.join(p).join("intermediates.d").join(&domain)
                 };
-                (CertType::Ica, parent, dest)
+                (CertificateType::Ica, parent, dest)
             } else {
                 let dest = context.join(&domain);
-                (CertType::Ica, None, dest)
+                (CertificateType::Ica, None, dest)
             }
         } else {
             let dest = context.join(&domain);
-            (CertType::RootCa, None, dest)
+            (CertificateType::RootCa, None, dest)
         }
     } else {
         // Server certificate (TLS)
@@ -1667,10 +1665,10 @@ pub async fn import_certificate(source: &Path, context: &Path) -> Result<()> {
             } else {
                 context.join(p).join("certificates.d").join(&domain)
             };
-            (CertType::Tls, parent, dest)
+            (CertificateType::Tls, parent, dest)
         } else {
             let dest = context.join(&domain).join("certificates.d").join(&domain);
-            (CertType::Tls, None, dest)
+            (CertificateType::Tls, None, dest)
         }
     };
 
@@ -1727,7 +1725,7 @@ fn copy_dir_all(src: &Path, dst: &Path) -> Result<()> {
 }
 
 pub fn export_certificate(context: &Path, domain: &str) -> Result<()> {
-    let cert_path = find_cert_path(context, domain, &CertType::Tls);
+    let cert_path = find_cert_path(context, domain, &CertificateType::Tls);
 
     if cert_path.is_none() {
         return Err(anyhow::anyhow!(
@@ -1834,7 +1832,7 @@ pub fn find_tls_certs_signed_by(context: &Path, ca_domain: &str) -> Result<Vec<C
                         let cert_info = CertificateInfo {
                             path: path.to_path_buf(),
                             domain,
-                            cert_type: CertificateType::ServerCert,
+                            cert_type: CertificateType::Tls,
                             issuer: issuer.clone(),
                             subject,
                             not_before,
@@ -1913,7 +1911,7 @@ pub fn find_icas_under_root(context: &Path, root_domain: &str) -> Result<Vec<Cer
                     let cert_info = CertificateInfo {
                         path: ica_path.clone(),
                         domain: domain.clone(),
-                        cert_type: CertificateType::IntermediateCa,
+                        cert_type: CertificateType::Ica,
                         issuer,
                         subject,
                         not_before,
@@ -2000,20 +1998,20 @@ pub async fn revoke_certificate(context: &Path, domain: &str, skip_confirm: bool
             if let Ok(pem) = fs::read(root_path.join("crt.pem")) {
                 if let Ok(cert) = X509::from_pem(&pem) {
                     if is_ca_certificate(&cert) {
-                        (CertType::RootCa, Some(root_path.join("crt.pem")))
+                        (CertificateType::RootCa, Some(root_path.join("crt.pem")))
                     } else {
-                        (CertType::Tls, Some(root_path.join("crt.pem")))
+                        (CertificateType::Tls, Some(root_path.join("crt.pem")))
                     }
                 } else {
-                    (CertType::Tls, Some(root_path.join("crt.pem")))
+                    (CertificateType::Tls, Some(root_path.join("crt.pem")))
                 }
             } else {
-                (CertType::Tls, Some(root_path.join("crt.pem")))
+                (CertificateType::Tls, Some(root_path.join("crt.pem")))
             }
         } else if let Some(ica_path) = find_nested_ica_path(context, domain) {
-            (CertType::Ica, Some(ica_path))
+            (CertificateType::Ica, Some(ica_path))
         } else if let Some(tls_path) = find_tls_cert_path(context, domain) {
-            (CertType::Tls, Some(tls_path))
+            (CertificateType::Tls, Some(tls_path))
         } else {
             bail!("Certificate '{}' not found in context", domain);
         }
@@ -2027,7 +2025,7 @@ pub async fn revoke_certificate(context: &Path, domain: &str, skip_confirm: bool
 
     // Handle different cert types with appropriate confirmation
     match cert_type {
-        CertType::RootCa => {
+        CertificateType::RootCa => {
             // Find all ICAs under this root
             let icas = find_icas_under_root(context, domain)?;
             // Collect all TLS certs from root and ICAs
@@ -2088,7 +2086,7 @@ pub async fn revoke_certificate(context: &Path, domain: &str, skip_confirm: bool
             );
         }
 
-        CertType::Ica => {
+        CertificateType::Ica => {
             // Find all TLS certs signed by this ICA
             let tls_certs = find_all_tls_under_ica(context, domain)?;
 
@@ -2140,7 +2138,7 @@ pub async fn revoke_certificate(context: &Path, domain: &str, skip_confirm: bool
             );
         }
 
-        CertType::Tls => {
+        CertificateType::Tls => {
             // For TLS certs, just confirm if not skipping
             if !skip_confirm {
                 println!(
@@ -2452,7 +2450,7 @@ pub async fn fix_ica_and_children(
     if !ask_confirm(&prompt, yes) {
         results.push(FixResult::skipped(
             ica_domain.to_string(),
-            CertificateType::IntermediateCa,
+            CertificateType::Ica,
             "User declined".to_string(),
         ));
         return Ok(results);
@@ -2468,7 +2466,7 @@ pub async fn fix_ica_and_children(
             );
             results.push(FixResult::fixed(
                 ica_domain.to_string(),
-                CertificateType::IntermediateCa,
+                CertificateType::Ica,
                 "Re-signed with new serial".to_string(),
             ));
         }
@@ -2481,7 +2479,7 @@ pub async fn fix_ica_and_children(
             );
             results.push(FixResult::skipped(
                 ica_domain.to_string(),
-                CertificateType::IntermediateCa,
+                CertificateType::Ica,
                 format!("Failed: {}", e),
             ));
             return Ok(results); // Can't proceed if ICA re-sign failed
@@ -2503,7 +2501,7 @@ pub async fn fix_ica_and_children(
                 );
                 results.push(FixResult::fixed(
                     tls_cert.domain.clone(),
-                    CertificateType::ServerCert,
+                    CertificateType::Tls,
                     format!("Re-signed with new serial {}", new_serial),
                 ));
 
@@ -2521,7 +2519,7 @@ pub async fn fix_ica_and_children(
                 );
                 results.push(FixResult::skipped(
                     tls_cert.domain.clone(),
-                    CertificateType::ServerCert,
+                    CertificateType::Tls,
                     format!("Failed: {}", e),
                 ));
             }
@@ -2662,7 +2660,7 @@ pub async fn list_certificates(context: &Path, options: CheckOptions) -> Result<
                                 if is_ca_certificate(&cert) {
                                     // It's a CA - check path to determine Root or ICA
                                     if path_str.contains("/intermediates.d/") {
-                                        CertificateType::IntermediateCa
+                                        CertificateType::Ica
                                     } else {
                                         CertificateType::RootCa
                                     }
@@ -2672,25 +2670,17 @@ pub async fn list_certificates(context: &Path, options: CheckOptions) -> Result<
                                     // Not CA but in CA/ICA directory structure - likely an ICA that was imported incorrectly
                                     // Check metadata for hints
                                     match meta.cert_type {
-                                        CertType::Ica => CertificateType::IntermediateCa,
-                                        _ => CertificateType::ServerCert,
+                                        CertificateType::Ica => CertificateType::Ica,
+                                        _ => CertificateType::Tls,
                                     }
                                 } else {
-                                    CertificateType::ServerCert
+                                    CertificateType::Tls
                                 }
                             } else {
-                                match meta.cert_type {
-                                    CertType::RootCa => CertificateType::RootCa,
-                                    CertType::Ica => CertificateType::IntermediateCa,
-                                    CertType::Tls => CertificateType::ServerCert,
-                                }
+                                meta.cert_type.clone()
                             }
                         } else {
-                            match meta.cert_type {
-                                CertType::RootCa => CertificateType::RootCa,
-                                CertType::Ica => CertificateType::IntermediateCa,
-                                CertType::Tls => CertificateType::ServerCert,
-                            }
+                            meta.cert_type.clone()
                         };
 
                         let not_after = meta.not_after.clone();
@@ -2879,7 +2869,7 @@ pub async fn list_certificates(context: &Path, options: CheckOptions) -> Result<
         }
 
         // Auto-fix logic for TLS certificates
-        if cert.cert_type == CertificateType::ServerCert {
+        if cert.cert_type == CertificateType::Tls {
             let cert_dir = cert.path.parent().unwrap();
 
             let cert_dir_str = cert_dir.to_string_lossy();
@@ -2904,7 +2894,7 @@ pub async fn list_certificates(context: &Path, options: CheckOptions) -> Result<
                                             );
                                             fix_results.push(FixResult::fixed(
                                                 cert.domain.clone(),
-                                                CertificateType::ServerCert,
+                                                CertificateType::Tls,
                                                 "Fullchain order fixed".to_string(),
                                             ));
                                         }
@@ -2917,7 +2907,7 @@ pub async fn list_certificates(context: &Path, options: CheckOptions) -> Result<
                                             );
                                             fix_results.push(FixResult::skipped(
                                                 cert.domain.clone(),
-                                                CertificateType::ServerCert,
+                                                CertificateType::Tls,
                                                 format!("Fullchain fix failed: {}", e),
                                             ));
                                         }
@@ -2925,7 +2915,7 @@ pub async fn list_certificates(context: &Path, options: CheckOptions) -> Result<
                                 } else {
                                     fix_results.push(FixResult::skipped(
                                         cert.domain.clone(),
-                                        CertificateType::ServerCert,
+                                        CertificateType::Tls,
                                         "User declined fullchain fix".to_string(),
                                     ));
                                 }
@@ -2951,7 +2941,7 @@ pub async fn list_certificates(context: &Path, options: CheckOptions) -> Result<
                     let Some(parent) = cert.parent.as_deref() else {
                         fix_results.push(FixResult::skipped(
                             cert.domain.clone(),
-                            CertificateType::ServerCert,
+                            CertificateType::Tls,
                             "Missing parent CA reference".to_string(),
                         ));
                         continue;
@@ -2966,7 +2956,7 @@ pub async fn list_certificates(context: &Path, options: CheckOptions) -> Result<
                             );
                             fix_results.push(FixResult::fixed(
                                 cert.domain.clone(),
-                                CertificateType::ServerCert,
+                                CertificateType::Tls,
                                 format!("Re-signed with new serial {}", new_serial),
                             ));
 
@@ -2986,7 +2976,7 @@ pub async fn list_certificates(context: &Path, options: CheckOptions) -> Result<
                             );
                             fix_results.push(FixResult::skipped(
                                 cert.domain.clone(),
-                                CertificateType::ServerCert,
+                                CertificateType::Tls,
                                 format!("Re-sign failed: {}", e),
                             ));
                         }
@@ -2994,7 +2984,7 @@ pub async fn list_certificates(context: &Path, options: CheckOptions) -> Result<
                 } else {
                     fix_results.push(FixResult::skipped(
                         cert.domain.clone(),
-                        CertificateType::ServerCert,
+                        CertificateType::Tls,
                         "User declined".to_string(),
                     ));
                 }
@@ -3026,8 +3016,7 @@ pub async fn list_certificates(context: &Path, options: CheckOptions) -> Result<
         }
 
         // Handle ICA issues (re-sign ICA and children)
-        if auto_fix && cert.cert_type == CertificateType::IntermediateCa && !cert_issues.is_empty()
-        {
+        if auto_fix && cert.cert_type == CertificateType::Ica && !cert_issues.is_empty() {
             let issues_str = cert_issues
                 .iter()
                 .map(|s| s.red().to_string())
@@ -3053,12 +3042,12 @@ pub async fn list_certificates(context: &Path, options: CheckOptions) -> Result<
                     );
                     fix_results.push(FixResult::skipped(
                         cert.domain.clone(),
-                        CertificateType::IntermediateCa,
+                        CertificateType::Ica,
                         format!("Fix failed: {}", e),
                     ));
                 }
             }
-        } else if cert.cert_type == CertificateType::IntermediateCa && !cert_issues.is_empty() {
+        } else if cert.cert_type == CertificateType::Ica && !cert_issues.is_empty() {
             let issues_str = cert_issues.join(", ");
             println!(
                 "  Issues: {} - Run with --auto-fix to fix (will fix ICA and children)",
@@ -3089,8 +3078,8 @@ pub async fn list_certificates(context: &Path, options: CheckOptions) -> Result<
             for result in fix_results.iter().filter(|r| r.fixed) {
                 let type_str = match result.cert_type {
                     CertificateType::RootCa => "Root CA",
-                    CertificateType::IntermediateCa => "ICA",
-                    CertificateType::ServerCert => "TLS",
+                    CertificateType::Ica => "ICA",
+                    CertificateType::Tls => "TLS",
                 };
                 println!(
                     "  {} {} - {}",
@@ -3105,8 +3094,8 @@ pub async fn list_certificates(context: &Path, options: CheckOptions) -> Result<
                 for result in fix_results.iter().filter(|r| r.skipped) {
                     let type_str = match result.cert_type {
                         CertificateType::RootCa => "Root CA",
-                        CertificateType::IntermediateCa => "ICA",
-                        CertificateType::ServerCert => "TLS",
+                        CertificateType::Ica => "ICA",
+                        CertificateType::Tls => "TLS",
                     };
                     println!(
                         "  {} {} - {}",
@@ -3133,7 +3122,7 @@ pub async fn list_certificates(context: &Path, options: CheckOptions) -> Result<
     if renew {
         println!("\n=== Renewing certificates ===");
         for cert in &certificates {
-            if cert.needs_renewal && cert.cert_type == CertificateType::ServerCert {
+            if cert.needs_renewal && cert.cert_type == CertificateType::Tls {
                 if let Some(parent) = &cert.parent {
                     println!(
                         "Renewing certificate: {} (signed by {})",
@@ -3319,16 +3308,17 @@ async fn fetch_remote_cert(domain: &str) -> Result<RemoteCertInfo> {
 async fn run_remote_checks(
     certificates: &[CertificateInfo],
 ) -> Result<std::collections::HashMap<String, RemoteCheckResult>> {
-    use std::collections::HashMap;
-    let mut results = HashMap::new();
+    use futures::future;
 
-    for cert in certificates
+    let certs: Vec<_> = certificates
         .iter()
-        .filter(|c| c.cert_type == CertificateType::ServerCert)
-    {
-        let domain = cert.domain.clone();
+        .filter(|c| c.cert_type == CertificateType::Tls)
+        .collect();
 
-        // DNS resolution
+    let futures = certs.iter().map(|cert| async {
+        let domain = cert.domain.clone();
+        let cert_path = cert.path.clone();
+
         let (dns_resolved, resolved_ips, dns_error) = match tokio::task::spawn_blocking({
             let domain = domain.clone();
             move || {
@@ -3347,7 +3337,6 @@ async fn run_remote_checks(
             Err(e) => (false, vec![], Some(e.to_string())),
         };
 
-        // Connectivity check (only if DNS succeeded)
         let (connectivity_success, connectivity_error) = if dns_resolved {
             match tcp_connect(&domain).await {
                 Ok(()) => (true, None),
@@ -3357,7 +3346,6 @@ async fn run_remote_checks(
             (false, None)
         };
 
-        // CertSignature check (only if connectivity succeeded)
         let (remote_cert, cert_error) = if connectivity_success {
             match fetch_remote_cert(&domain).await {
                 Ok(info) => (Some(info), None),
@@ -3367,9 +3355,8 @@ async fn run_remote_checks(
             (None, None)
         };
 
-        // Compare with local
         let (matches_local, local_serial) = if let Some(remote) = &remote_cert {
-            if let Ok(local_pem) = fs::read(&cert.path) {
+            if let Ok(local_pem) = fs::read(&cert_path) {
                 if let Ok(local_cert) = openssl::x509::X509::from_pem(&local_pem) {
                     let local_s = local_cert
                         .serial_number()
@@ -3390,7 +3377,7 @@ async fn run_remote_checks(
             (false, None)
         };
 
-        results.insert(
+        (
             domain,
             RemoteCheckResult {
                 dns_resolved,
@@ -3403,8 +3390,11 @@ async fn run_remote_checks(
                 matches_local,
                 local_serial,
             },
-        );
-    }
+        )
+    });
+
+    let results_vec = future::join_all(futures).await;
+    let results: std::collections::HashMap<_, _> = results_vec.into_iter().collect();
 
     Ok(results)
 }
@@ -3422,10 +3412,7 @@ async fn analyze_certificate(path: &Path, expiration_alert_days: u32) -> Option<
 
     // Try to read metadata first, fall back to path-based detection
     let (cert_type, parent, key_algorithm) = match read_metadata(path.parent().unwrap_or(path)) {
-        Ok(meta) => {
-            let ct: CertificateType = (&meta.cert_type).into();
-            (ct, meta.parent, meta.key_algorithm)
-        }
+        Ok(meta) => (meta.cert_type.clone(), meta.parent, meta.key_algorithm),
         Err(_) => (
             determine_certificate_type(path),
             None,
@@ -3520,9 +3507,9 @@ fn determine_certificate_type(path: &Path) -> CertificateType {
     let path_str = path.to_string_lossy().to_string();
 
     if path_str.contains("intermediates.d") {
-        CertificateType::IntermediateCa
+        CertificateType::Ica
     } else if path_str.contains("certificates.d") {
-        CertificateType::ServerCert
+        CertificateType::Tls
     } else {
         // No longer checking for "certs.d" - all certificates directly under context/<domain>
         CertificateType::RootCa
@@ -3546,11 +3533,22 @@ pub struct CertificateInfo {
     pub key_algorithm: Option<KeyAlgorithm>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "kebab-case")]
 pub enum CertificateType {
     RootCa,
-    IntermediateCa,
-    ServerCert,
+    Ica,
+    Tls,
+}
+
+impl std::fmt::Display for CertificateType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CertificateType::RootCa => write!(f, "root-ca"),
+            CertificateType::Ica => write!(f, "ica"),
+            CertificateType::Tls => write!(f, "tls"),
+        }
+    }
 }
 
 /// Options for the check command
@@ -3577,16 +3575,6 @@ struct DisplayOptions {
     detail: bool,
     verify_openssl: bool,
     remote_checks: std::collections::HashMap<String, RemoteCheckResult>,
-}
-
-impl From<&CertType> for CertificateType {
-    fn from(cert_type: &CertType) -> Self {
-        match cert_type {
-            CertType::RootCa => CertificateType::RootCa,
-            CertType::Ica => CertificateType::IntermediateCa,
-            CertType::Tls => CertificateType::ServerCert,
-        }
-    }
 }
 
 // ============================================
@@ -3831,7 +3819,7 @@ DNS.3 = test.example.com
             certificates: vec![
                 CertMetadata {
                     version: 1,
-                    cert_type: CertType::RootCa,
+                    cert_type: CertificateType::RootCa,
                     domain: "example.com".to_string(),
                     subject: "CN=example.com".to_string(),
                     issuer: "CN=example.com".to_string(),
@@ -3846,7 +3834,7 @@ DNS.3 = test.example.com
                 },
                 CertMetadata {
                     version: 1,
-                    cert_type: CertType::Ica,
+                    cert_type: CertificateType::Ica,
                     domain: "sub.example.com".to_string(),
                     subject: "CN=sub.example.com".to_string(),
                     issuer: "CN=example.com".to_string(),
@@ -3912,7 +3900,7 @@ DNS.3 = test.example.com
 
         let cert1 = CertMetadata {
             version: 1,
-            cert_type: CertType::RootCa,
+            cert_type: CertificateType::RootCa,
             domain: "example.com".to_string(),
             subject: "CN=example.com".to_string(),
             issuer: "CN=example.com".to_string(),
@@ -3930,7 +3918,7 @@ DNS.3 = test.example.com
 
         let cert2 = CertMetadata {
             version: 1,
-            cert_type: CertType::Ica,
+            cert_type: CertificateType::Ica,
             domain: "sub.example.com".to_string(),
             subject: "CN=sub.example.com".to_string(),
             issuer: "CN=example.com".to_string(),
@@ -3952,7 +3940,7 @@ DNS.3 = test.example.com
         // Update existing
         let cert1_updated = CertMetadata {
             version: 1,
-            cert_type: CertType::RootCa,
+            cert_type: CertificateType::RootCa,
             domain: "example.com".to_string(),
             subject: "CN=example.com-updated".to_string(),
             issuer: "CN=example.com".to_string(),
@@ -3985,7 +3973,7 @@ DNS.3 = test.example.com
 
         let cert = CertMetadata {
             version: 1,
-            cert_type: CertType::RootCa,
+            cert_type: CertificateType::RootCa,
             domain: "example.com".to_string(),
             subject: "CN=example.com".to_string(),
             issuer: "CN=example.com".to_string(),
@@ -4028,7 +4016,7 @@ DNS.3 = test.example.com
 
         let meta = CertMetadata {
             version: 1,
-            cert_type: CertType::RootCa,
+            cert_type: CertificateType::RootCa,
             domain: "example.com".to_string(),
             subject: "CN=example.com".to_string(),
             issuer: "CN=example.com".to_string(),
@@ -4048,7 +4036,7 @@ DNS.3 = test.example.com
 
         let read_meta = read_metadata(dir).unwrap();
         assert_eq!(read_meta.domain, "example.com");
-        assert_eq!(read_meta.cert_type, CertType::RootCa);
+        assert_eq!(read_meta.cert_type, CertificateType::RootCa);
     }
 
     #[test]
@@ -4148,14 +4136,14 @@ DNS.3 = test.example.com
     fn test_determine_certificate_type_intermediates() {
         let path = PathBuf::from("/context/root-ca/intermediates.d/ica/crt.pem");
         let cert_type = determine_certificate_type(&path);
-        assert_eq!(cert_type, CertificateType::IntermediateCa);
+        assert_eq!(cert_type, CertificateType::Ica);
     }
 
     #[test]
     fn test_determine_certificate_type_certificates() {
         let path = PathBuf::from("/context/root-ca/certificates.d/server/crt.pem");
         let cert_type = determine_certificate_type(&path);
-        assert_eq!(cert_type, CertificateType::ServerCert);
+        assert_eq!(cert_type, CertificateType::Tls);
     }
 
     #[test]
@@ -4166,22 +4154,22 @@ DNS.3 = test.example.com
     }
 
     #[test]
-    fn test_check_certificate_expiry() {
+    fn test_cert_file_exists_and_non_empty() {
         let temp_dir = TempDir::new().unwrap();
         let cert_path = temp_dir.path().join("cert.pem");
 
         // Non-existent file
-        let result = check_certificate_expiry(&cert_path.join("nonexistent"));
+        let result = cert_file_exists_and_non_empty(&cert_path.join("nonexistent"));
         assert!(!result.unwrap_or(false));
 
         // Empty file
         fs::write(&cert_path, "").unwrap();
-        let result = check_certificate_expiry(&cert_path);
+        let result = cert_file_exists_and_non_empty(&cert_path);
         assert!(!result.unwrap());
 
         // Non-empty file
         fs::write(&cert_path, "dummy content").unwrap();
-        let result = check_certificate_expiry(&cert_path);
+        let result = cert_file_exists_and_non_empty(&cert_path);
         assert!(result.unwrap());
     }
 
@@ -4223,9 +4211,9 @@ DNS.3 = test.example.com
 
     #[test]
     fn test_cert_type_display() {
-        assert_eq!(CertType::RootCa.to_string(), "root-ca");
-        assert_eq!(CertType::Ica.to_string(), "ica");
-        assert_eq!(CertType::Tls.to_string(), "tls");
+        assert_eq!(CertificateType::RootCa.to_string(), "root-ca");
+        assert_eq!(CertificateType::Ica.to_string(), "ica");
+        assert_eq!(CertificateType::Tls.to_string(), "tls");
     }
 
     #[test]
@@ -4233,18 +4221,6 @@ DNS.3 = test.example.com
         let metadata = GlobalCertMetadata::default();
         assert_eq!(metadata.version, 1);
         assert!(metadata.certificates.is_empty());
-    }
-
-    #[test]
-    fn test_certificate_type_from_cert_type() {
-        let root: CertificateType = (&CertType::RootCa).into();
-        assert_eq!(root, CertificateType::RootCa);
-
-        let ica: CertificateType = (&CertType::Ica).into();
-        assert_eq!(ica, CertificateType::IntermediateCa);
-
-        let tls: CertificateType = (&CertType::Tls).into();
-        assert_eq!(tls, CertificateType::ServerCert);
     }
 
     #[test]
@@ -4275,8 +4251,8 @@ DNS.3 = test.example.com
         use std::cmp::Ordering;
 
         let root = CertificateType::RootCa;
-        let ica = CertificateType::IntermediateCa;
-        let server = CertificateType::ServerCert;
+        let ica = CertificateType::Ica;
+        let server = CertificateType::Tls;
 
         assert_eq!(root.cmp(&ica), Ordering::Less);
         assert_eq!(ica.cmp(&server), Ordering::Less);
@@ -4371,7 +4347,7 @@ DNS.3 = test.example.com
         fs::create_dir_all(&root_dir).unwrap();
         fs::write(root_dir.join("crt.pem"), "dummy").unwrap();
 
-        let result = find_cert_path(context, "example.com", &CertType::RootCa);
+        let result = find_cert_path(context, "example.com", &CertificateType::RootCa);
         assert!(result.is_some());
     }
 
@@ -4384,7 +4360,7 @@ DNS.3 = test.example.com
         fs::create_dir_all(&root_dir).unwrap();
         fs::write(root_dir.join("crt.pem"), "dummy").unwrap();
 
-        let result = find_cert_path(context, "example.com", &CertType::Ica);
+        let result = find_cert_path(context, "example.com", &CertificateType::Ica);
         assert!(result.is_some());
     }
 
@@ -4436,7 +4412,7 @@ IP.1 = 127.0.0.1
         fs::create_dir_all(&ica_dir).unwrap();
         fs::write(ica_dir.join("crt.pem"), "dummy").unwrap();
 
-        let result = find_cert_path(context, "ica.com", &CertType::Ica);
+        let result = find_cert_path(context, "ica.com", &CertificateType::Ica);
         assert!(result.is_some());
     }
 
@@ -4453,7 +4429,7 @@ IP.1 = 127.0.0.1
         fs::create_dir_all(&cert_dir).unwrap();
         fs::write(cert_dir.join("crt.pem"), "dummy").unwrap();
 
-        let result = find_cert_path(context, "server.com", &CertType::Tls);
+        let result = find_cert_path(context, "server.com", &CertificateType::Tls);
         assert!(result.is_some());
     }
 
@@ -4474,7 +4450,7 @@ IP.1 = 127.0.0.1
         fs::create_dir_all(&cert_dir).unwrap();
         fs::write(cert_dir.join("crt.pem"), "dummy").unwrap();
 
-        let result = find_cert_path(context, "server.com", &CertType::Tls);
+        let result = find_cert_path(context, "server.com", &CertificateType::Tls);
         assert!(result.is_some());
     }
 
@@ -4565,7 +4541,7 @@ IP.1 = 127.0.0.1
     }
 
     #[test]
-    fn test_check_certificate_expiry_valid() {
+    fn test_cert_file_exists_and_non_empty_valid() {
         let temp_dir = TempDir::new().unwrap();
 
         let (cert_pem, key_pem) = create_test_cert("Test Cert", 3650);
@@ -4574,19 +4550,19 @@ IP.1 = 127.0.0.1
         fs::write(&cert_path, &cert_pem).unwrap();
         fs::write(&key_path, &key_pem).unwrap();
 
-        let result = check_certificate_expiry(&cert_path);
+        let result = cert_file_exists_and_non_empty(&cert_path);
         assert!(result.is_ok());
         assert!(result.unwrap());
     }
 
     #[test]
-    fn test_check_certificate_expiry_expired() {
-        // Use check_certificate_expiry with an empty/invalid file to test error handling
+    fn test_cert_file_exists_and_non_empty_expired() {
+        // Use cert_file_exists_and_non_empty with an empty/invalid file to test error handling
         let temp_dir = TempDir::new().unwrap();
         let cert_path = temp_dir.path().join("nonexistent.pem");
 
         // Non-existent file should return Ok(false)
-        let result = check_certificate_expiry(&cert_path);
+        let result = cert_file_exists_and_non_empty(&cert_path);
         assert!(!result.unwrap_or(false));
     }
 
@@ -4651,7 +4627,7 @@ IP.1 = 127.0.0.1
             CertificateInfo {
                 path: PathBuf::from("/test/root.com/intermediates.d/ica.com/crt.pem"),
                 domain: "ica.com".to_string(),
-                cert_type: CertificateType::IntermediateCa,
+                cert_type: CertificateType::Ica,
                 issuer: "root.com".to_string(),
                 subject: "CN=ica.com".to_string(),
                 not_before: "2024-01-01".to_string(),
@@ -4668,7 +4644,7 @@ IP.1 = 127.0.0.1
                     "/test/root.com/intermediates.d/ica.com/certificates.d/server.com/crt.pem",
                 ),
                 domain: "server.com".to_string(),
-                cert_type: CertificateType::ServerCert,
+                cert_type: CertificateType::Tls,
                 issuer: "ica.com".to_string(),
                 subject: "CN=server.com".to_string(),
                 not_before: "2024-01-01".to_string(),
@@ -4758,12 +4734,13 @@ IP.1 = 127.0.0.1
         let dir = temp_dir.path().join("test.com");
         fs::create_dir_all(&dir).unwrap();
 
-        let metadata = create_metadata_from_cert(dir.as_path(), &cert, CertType::RootCa, None);
+        let metadata =
+            create_metadata_from_cert(dir.as_path(), &cert, CertificateType::RootCa, None);
         assert!(metadata.is_ok());
 
         let meta = metadata.unwrap();
         assert_eq!(meta.domain, "test.com");
-        assert_eq!(meta.cert_type, CertType::RootCa);
+        assert_eq!(meta.cert_type, CertificateType::RootCa);
     }
 
     #[test]
@@ -4785,7 +4762,7 @@ IP.1 = 127.0.0.1
         for i in 0..5 {
             let cert = CertMetadata {
                 version: 1,
-                cert_type: CertType::RootCa,
+                cert_type: CertificateType::RootCa,
                 domain: format!("domain{}.com", i),
                 subject: format!("CN=domain{}.com", i),
                 issuer: format!("CN=domain{}.com", i),
@@ -4892,7 +4869,7 @@ IP.1 = 127.0.0.1
         let temp_dir = TempDir::new().unwrap();
         let context = temp_dir.path();
 
-        let result = find_cert_path(context, "nonexistent.com", &CertType::RootCa);
+        let result = find_cert_path(context, "nonexistent.com", &CertificateType::RootCa);
         assert!(result.is_none());
     }
 
@@ -4939,7 +4916,7 @@ IP.1 = 127.0.0.1
         let certs = vec![
             CertMetadata {
                 version: 1,
-                cert_type: CertType::RootCa,
+                cert_type: CertificateType::RootCa,
                 domain: "zebra.com".to_string(),
                 subject: "CN=zebra".to_string(),
                 issuer: "CN=zebra".to_string(),
@@ -4954,7 +4931,7 @@ IP.1 = 127.0.0.1
             },
             CertMetadata {
                 version: 1,
-                cert_type: CertType::RootCa,
+                cert_type: CertificateType::RootCa,
                 domain: "alpha.com".to_string(),
                 subject: "CN=alpha".to_string(),
                 issuer: "CN=alpha".to_string(),
@@ -4969,7 +4946,7 @@ IP.1 = 127.0.0.1
             },
             CertMetadata {
                 version: 1,
-                cert_type: CertType::RootCa,
+                cert_type: CertificateType::RootCa,
                 domain: "middle.com".to_string(),
                 subject: "CN=middle".to_string(),
                 issuer: "CN=middle".to_string(),
@@ -5001,8 +4978,8 @@ IP.1 = 127.0.0.1
     #[test]
     fn test_certificate_type_serialization() {
         let root = CertificateType::RootCa;
-        let ica = CertificateType::IntermediateCa;
-        let server = CertificateType::ServerCert;
+        let ica = CertificateType::Ica;
+        let server = CertificateType::Tls;
 
         // Test that the type can be converted to string via debug format
         let root_str = format!("{:?}", root);
@@ -5054,10 +5031,10 @@ DNS.3=foo.bar.com
     }
 
     #[test]
-    fn test_check_certificate_expiry_not_exists() {
+    fn test_cert_file_exists_and_non_empty_not_exists() {
         let temp_dir = tempfile::tempdir().unwrap();
         let nonexistent = temp_dir.path().join("nonexistent.crt");
-        let result = check_certificate_expiry(&nonexistent).unwrap();
+        let result = cert_file_exists_and_non_empty(&nonexistent).unwrap();
         assert!(!result);
     }
 
@@ -5280,7 +5257,7 @@ DNS.3=foo.bar.com
 
         let cert = CertMetadata {
             version: 1,
-            cert_type: CertType::RootCa,
+            cert_type: CertificateType::RootCa,
             domain: "example.com".to_string(),
             subject: "CN=example.com".to_string(),
             issuer: "CN=example.com".to_string(),
@@ -5423,7 +5400,7 @@ DNS.3=foo.bar.com
 
         let cert1 = CertMetadata {
             version: 1,
-            cert_type: CertType::RootCa,
+            cert_type: CertificateType::RootCa,
             domain: "example.com".to_string(),
             subject: "CN=example.com".to_string(),
             issuer: "CN=example.com".to_string(),
@@ -5441,7 +5418,7 @@ DNS.3=foo.bar.com
 
         let cert2 = CertMetadata {
             version: 1,
-            cert_type: CertType::RootCa,
+            cert_type: CertificateType::RootCa,
             domain: "example.com".to_string(),
             subject: "CN=example.com-updated".to_string(),
             issuer: "CN=example.com".to_string(),
@@ -5597,20 +5574,17 @@ DNS.3=foo.bar.com
     #[test]
     fn test_certificate_type_equality() {
         assert_eq!(CertificateType::RootCa, CertificateType::RootCa);
-        assert_eq!(
-            CertificateType::IntermediateCa,
-            CertificateType::IntermediateCa
-        );
-        assert_eq!(CertificateType::ServerCert, CertificateType::ServerCert);
-        assert_ne!(CertificateType::RootCa, CertificateType::IntermediateCa);
+        assert_eq!(CertificateType::Ica, CertificateType::Ica);
+        assert_eq!(CertificateType::Tls, CertificateType::Tls);
+        assert_ne!(CertificateType::RootCa, CertificateType::Ica);
     }
 
     #[test]
     fn test_cert_type_equality() {
-        assert_eq!(CertType::RootCa, CertType::RootCa);
-        assert_eq!(CertType::Ica, CertType::Ica);
-        assert_eq!(CertType::Tls, CertType::Tls);
-        assert_ne!(CertType::RootCa, CertType::Ica);
+        assert_eq!(CertificateType::RootCa, CertificateType::RootCa);
+        assert_eq!(CertificateType::Ica, CertificateType::Ica);
+        assert_eq!(CertificateType::Tls, CertificateType::Tls);
+        assert_ne!(CertificateType::RootCa, CertificateType::Ica);
     }
 
     #[test]
@@ -5624,7 +5598,7 @@ DNS.3=foo.bar.com
     fn test_cert_metadata_clone() {
         let meta = CertMetadata {
             version: 1,
-            cert_type: CertType::RootCa,
+            cert_type: CertificateType::RootCa,
             domain: "example.com".to_string(),
             subject: "CN=example.com".to_string(),
             issuer: "CN=example.com".to_string(),
@@ -5915,17 +5889,14 @@ DNS.3=foo.bar.com
             determine_certificate_type(&root_path),
             CertificateType::RootCa
         );
-        assert_eq!(
-            determine_certificate_type(&ica_path),
-            CertificateType::IntermediateCa
-        );
+        assert_eq!(determine_certificate_type(&ica_path), CertificateType::Ica);
         assert_eq!(
             determine_certificate_type(&server_path),
-            CertificateType::ServerCert
+            CertificateType::Tls
         );
         assert_eq!(
             determine_certificate_type(&server_under_ica),
-            CertificateType::ServerCert
+            CertificateType::Tls
         );
     }
 
@@ -5948,22 +5919,6 @@ DNS.3=foo.bar.com
         };
 
         assert_eq!(info.serial, "03E8");
-    }
-
-    #[test]
-    fn test_certificate_type_from_cert_type_impl() {
-        assert_eq!(
-            CertificateType::from(&CertType::RootCa),
-            CertificateType::RootCa
-        );
-        assert_eq!(
-            CertificateType::from(&CertType::Ica),
-            CertificateType::IntermediateCa
-        );
-        assert_eq!(
-            CertificateType::from(&CertType::Tls),
-            CertificateType::ServerCert
-        );
     }
 
     // ============================================
@@ -6107,7 +6062,7 @@ DNS.3=foo.bar.com
     fn test_fix_result_fixed() {
         let result = FixResult::fixed(
             "test.com".to_string(),
-            CertificateType::ServerCert,
+            CertificateType::Tls,
             "Re-signed".to_string(),
         );
         assert!(result.fixed);
@@ -6119,7 +6074,7 @@ DNS.3=foo.bar.com
     fn test_fix_result_skipped() {
         let result = FixResult::skipped(
             "test.com".to_string(),
-            CertificateType::ServerCert,
+            CertificateType::Tls,
             "User declined".to_string(),
         );
         assert!(!result.fixed);
