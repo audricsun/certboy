@@ -45,3 +45,5 @@ test_output.txt
 
 .cargo/
 site/
+
+STABLE.txt
