@@ -47,10 +47,21 @@ jobs:
         run: |
           set -euo pipefail
 
-          before="${{ github.event.before }}"
-          head="${{ github.sha }}"
+          # Handle workflow_run event context (different payload)
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            before="${{ github.event.workflow_run.previous_attempt_sha }}"
+            head="${{ github.event.workflow_run.head_sha }}"
+            # Fallback if previous_attempt_sha is empty
+            if [ -z "$before" ] || [ "$before" = "0000000000000000000000000000000000000000" ]; then
+              before="${{ github.event.workflow_run.base_sha }}"
+            fi
+          else
+            before="${{ github.event.before }}"
+            head="${{ github.sha }}"
+          fi
 
-          if [ "$before" = "0000000000000000000000000000000000000000" ] || [ "$before" = "$head" ]; then
+          # Handle empty/no previous commit
+          if [ "$before" = "0000000000000000000000000000000000000000" ] || [ "$before" = "$head" ] || [ -z "$before" ]; then
             changed=""
           else
             changed="$(git diff --name-only "$before" "$head" || true)"
