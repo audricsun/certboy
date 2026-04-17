@@ -1,0 +1,231 @@
+name: CI Build
+
+# Runs on every PR and on pushes to main — same trigger as ci-tests.yml
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  pre-build:
+    name: pre-build
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          token: ${{ secrets.GH_PAT }}
+      - name: Get VERSION
+        id: version
+        run: echo "version=$(cat VERSION)" >> "$GITHUB_OUTPUT"
+      - name: Set output
+        run: echo "VERSION=${{ steps.version.outputs.version }}" >> "$GITHUB_ENV"
+
+  build:
+    name: build (x86_64-unknown-linux-gnu)
+    runs-on: ubuntu-latest
+    needs: [pre-build]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          token: ${{ secrets.GH_PAT }}
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Cache crates.io index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry/index
+          key: crates-io-index-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: crates-io-index-${{ runner.os }}-
+      - name: Cache cargo install tools
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin
+          key: cargo-install-tools-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-install-tools-${{ runner.os }}-
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: cargo-registry-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-registry-${{ runner.os }}-
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release
+      - run: mv target/release/certboy "certboy-${{ env.VERSION }}-x86_64-unknown-linux-gnu"
+      - run: cp VERSION STABLE.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: certboy-${{ env.VERSION }}-gnu
+          path: |
+            certboy-${{ env.VERSION }}-x86_64-unknown-linux-gnu
+            STABLE.txt
+
+  build-musl:
+    name: build (x86_64-unknown-linux-musl)
+    runs-on: ubuntu-latest
+    needs: [pre-build]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          token: ${{ secrets.GH_PAT }}
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Cache crates.io index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry/index
+          key: crates-io-index-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: crates-io-index-${{ runner.os }}-
+      - name: Cache cargo install tools
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin
+          key: cargo-install-tools-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-install-tools-${{ runner.os }}-
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: cargo-registry-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-registry-${{ runner.os }}-
+      - uses: Swatinem/rust-cache@v2
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq musl-tools
+      - run: rustup target add x86_64-unknown-linux-musl
+      - run: cargo build --release --target x86_64-unknown-linux-musl
+      - run: mv target/x86_64-unknown-linux-musl/release/certboy "certboy-${{ env.VERSION }}-x86_64-unknown-linux-musl"
+      - run: cp VERSION STABLE.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: certboy-${{ env.VERSION }}-musl
+          path: |
+            certboy-${{ env.VERSION }}-x86_64-unknown-linux-musl
+            STABLE.txt
+
+  build-darwin:
+    name: build (aarch64-apple-darwin)
+    runs-on: macos-latest
+    needs: [pre-build]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          token: ${{ secrets.GH_PAT }}
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Cache crates.io index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry/index
+          key: crates-io-index-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: crates-io-index-${{ runner.os }}-
+      - name: Cache cargo install tools
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin
+          key: cargo-install-tools-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-install-tools-${{ runner.os }}-
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: cargo-registry-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-registry-${{ runner.os }}-
+      - uses: Swatinem/rust-cache@v2
+      - run: rustup target add aarch64-apple-darwin
+      - run: cargo build --release --target aarch64-apple-darwin
+      - run: mv target/aarch64-apple-darwin/release/certboy "certboy-${{ env.VERSION }}-aarch64-apple-darwin"
+      - run: cp VERSION STABLE.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: certboy-${{ env.VERSION }}-darwin
+          path: |
+            certboy-${{ env.VERSION }}-aarch64-apple-darwin
+            STABLE.txt
+
+  build-arm-linux:
+    name: build (aarch64-unknown-linux-gnu)
+    runs-on: ubuntu-latest
+    needs: [pre-build]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          token: ${{ secrets.GH_PAT }}
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cross-compilation toolchain
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq gcc-aarch64-linux-gnu
+      - name: Cache crates.io index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry/index
+          key: crates-io-index-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: crates-io-index-${{ runner.os }}-
+      - name: Cache cargo install tools
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin
+          key: cargo-install-tools-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-install-tools-${{ runner.os }}-
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: cargo-registry-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-registry-${{ runner.os }}-
+      - uses: Swatinem/rust-cache@v2
+      - run: rustup target add aarch64-unknown-linux-gnu
+      - run: cargo build --release --target aarch64-unknown-linux-gnu
+      - run: mv target/aarch64-unknown-linux-gnu/release/certboy "certboy-${{ env.VERSION }}-aarch64-unknown-linux-gnu"
+      - run: cp VERSION STABLE.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: certboy-${{ env.VERSION }}-arm-gnu
+          path: |
+            certboy-${{ env.VERSION }}-aarch64-unknown-linux-gnu
+            STABLE.txt
+
+  build-arm-linux-musl:
+    name: build (aarch64-unknown-linux-musl)
+    runs-on: ubuntu-latest
+    needs: [pre-build]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          token: ${{ secrets.GH_PAT }}
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cross-compilation toolchain
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq musl-tools gcc-aarch64-linux-musl
+      - name: Cache crates.io index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry/index
+          key: crates-io-index-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: crates-io-index-${{ runner.os }}-
+      - name: Cache cargo install tools
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin
+          key: cargo-install-tools-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-install-tools-${{ runner.os }}-
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: cargo-registry-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-registry-${{ runner.os }}-
+      - uses: Swatinem/rust-cache@v2
+      - run: rustup target add aarch64-unknown-linux-musl
+      - run: cargo build --release --target aarch64-unknown-linux-musl
+      - run: mv target/aarch64-unknown-linux-musl/release/certboy "certboy-${{ env.VERSION }}-aarch64-unknown-linux-musl"
+      - run: cp VERSION STABLE.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: certboy-${{ env.VERSION }}-arm-musl
+          path: |
+            certboy-${{ env.VERSION }}-aarch64-unknown-linux-musl
+            STABLE.txt
