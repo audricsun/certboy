@@ -7,21 +7,22 @@ site_dir = "site"
 dev_addr = "localhost:8000"
 
 [project.extra]
-icon = "docs/images/logo.png"
+icon = "assets/images/favicon.png"
 icon_alpha = true
 
 [project.theme]
 features = [
-    "navigation.sections",
-    "navigation.expand",
-    "navigation.path",
-    "navigation.top",
-    "toc.integrate",
-    "toc.follow",
+  "navigation.sections",
+  "navigation.expand",
+  "navigation.path",
+  "navigation.top",
+  "toc.integrate",
+  "toc.follow",
 ]
 
 nav = [
-    { "Home" = "index.md" },
-    { "Get Started" = "get-started.md" },
-    { "User Guides" = "user-guides.md" },
+  { "Home" = "index.md" },
+  { "Get Started" = "get-started.md" },
+  { "User Guides" = "user-guides.md" },
 ]
+

@@ -1,6 +1,6 @@
 # Certboy
 
-<div align="center"><img src="images/logo.png" width="250"></div>
+<div align="left"><img src="images/logo.png" width="400"></div>
 
 Certboy is a Rust CLI for managing a local PKI (Public Key Infrastructure):
 
@@ -29,4 +29,5 @@ This project is a POC for personal study and homelab use. **Do not suggest using
 
 ---
 
-*For questions or issues, please refer to the [GitHub repository](https://github.com/audricsun/certboy).*
+_For questions or issues, please refer to the [GitHub repository](https://github.com/audricsun/certboy)._
+
