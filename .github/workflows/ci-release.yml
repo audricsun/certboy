@@ -47,17 +47,21 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Handle different event types using GitHub's built-in variables
-          if [ "${{ github.event_name }}" = "workflow_run" ]; then
-            before="${{ github.event.workflow_run.base_sha }}"
-            head="${{ github.event.workflow_run.head_sha }}"
-          elif [ "${{ github.event_name }}" = "push" ]; then
+          head="${{ github.sha }}"
+
+          # Get parent commit - handle all event types uniformly
+          if [ "${{ github.event_name }}" = "push" ]; then
             before="${{ github.event.before }}"
-            head="${{ github.event.after }}"
           else
-            before="${{ github.event.before }}"
-            head="${{ github.sha }}"
+            # For workflow_run or other events, use git to find parent
+            before="$(git rev-parse "$head^" 2>/dev/null || echo "")"
           fi
+
+          echo "=== DEBUG INFO ==="
+          echo "EVENT: ${{ github.event_name }}"
+          echo "HEAD: $head"
+          echo "BEFORE: $before"
+          echo "===================="
 
           # Handle empty/no previous commit
           if [ "$before" = "0000000000000000000000000000000000000000" ] || [ "$before" = "$head" ] || [ -z "$before" ]; then
@@ -65,6 +69,10 @@ jobs:
           else
             changed="$(git diff --name-only "$before" "$head" || true)"
           fi
+
+          echo "=== CHANGED FILES ==="
+          echo "$changed"
+          echo "===================="
 
           version_changed=false
           if echo "$changed" | grep -q '^VERSION$'; then
