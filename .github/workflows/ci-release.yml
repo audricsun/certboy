@@ -47,14 +47,13 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Handle workflow_run event context (different payload)
+          # Handle different event types using GitHub's built-in variables
           if [ "${{ github.event_name }}" = "workflow_run" ]; then
-            before="${{ github.event.workflow_run.previous_attempt_sha }}"
+            before="${{ github.event.workflow_run.base_sha }}"
             head="${{ github.event.workflow_run.head_sha }}"
-            # Fallback if previous_attempt_sha is empty
-            if [ -z "$before" ] || [ "$before" = "0000000000000000000000000000000000000000" ]; then
-              before="${{ github.event.workflow_run.base_sha }}"
-            fi
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            before="${{ github.event.before }}"
+            head="${{ github.event.after }}"
           else
             before="${{ github.event.before }}"
             head="${{ github.sha }}"
@@ -93,7 +92,7 @@ jobs:
           esac
 
       - name: Auto bump build version
-        if: github.event_name == 'push' && steps.changes.outputs.version_changed != 'true'
+        if: github.event_name != 'pull_request' && steps.changes.outputs.version_changed != 'true'
         env:
           GH_TOKEN: ${{ secrets.GH_PAT }}
         shell: bash
