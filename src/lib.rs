@@ -7,6 +7,6 @@ pub use ca::init_root_ca;
 pub use cert::sign_cert;
 pub use ica::sign_ica;
 pub use utils::{
-    check_certificate_expiry, file_exists, generate_default_ext_content, list_certificates,
+    cert_file_exists_and_non_empty, file_exists, generate_default_ext_content, list_certificates,
     parse_alt_names_from_ext, read_file, update_fullchain_crt, write_file, CertificatePaths,
 };
