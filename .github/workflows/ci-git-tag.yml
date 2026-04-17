@@ -1,0 +1,67 @@
+name: CI Git Tag
+
+# Triggers when VERSION file changes on main push - pushes git tag
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'VERSION'
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  git-tag:
+    name: Git Tag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Enforce write permission
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          user="${{ github.actor }}"
+          perm="$(curl -fsSL \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${{ github.repository }}/collaborators/$user/permission" \
+            | jq -r '.permission')"
+          case "$perm" in
+            admin|maintain|write) echo "OK: $user has $perm access";;
+            *) echo "VERSION bumps on main require write access; $user has permission: $perm"; exit 1 ;;
+          esac
+
+      - name: Create and push version tag
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ ! -f VERSION ]; then
+            echo "ERROR: VERSION file not found"
+            exit 1
+          fi
+          VERSION=$(cat VERSION)
+          if [ -z "$VERSION" ]; then
+            echo "ERROR: VERSION file is empty"
+            exit 1
+          fi
+          tag="v${VERSION}"
+
+          git fetch --tags --force
+          if git ls-remote --tags origin "refs/tags/$tag" | grep -q "$tag"; then
+            echo "Tag already exists: $tag — skipping"
+          else
+            git tag -a "$tag" -m "$tag"
+            git push origin "$tag"
+          fi

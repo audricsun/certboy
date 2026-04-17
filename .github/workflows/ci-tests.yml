@@ -1,6 +1,6 @@
 name: CI Tests
 
-# Runs on every PR and on pushes to main — always runs all tests
+# Runs on every PR and on pushes to main
 on:
   pull_request:
     types: [opened, synchronize, reopened]

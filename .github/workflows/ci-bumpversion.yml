@@ -1,0 +1,45 @@
+name: CI Bumpversion
+
+# Triggers when files change on main push but NOT VERSION - auto-bumps build version
+on:
+  push:
+    branches:
+      - main
+    tags-ignore:
+      - '**'
+    paths-ignore:
+      - 'VERSION'
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  bump-version:
+    name: Auto Bump Version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Bump version
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          python -m pip install --upgrade pip
+          python -m pip install bumpver
+          make bump BUMP_TYPE=build
+          if git diff --quiet HEAD -- Cargo.lock; then
+            echo "Cargo.lock unchanged — not amending"
+          else
+            git add Cargo.lock
+            git commit --amend --no-edit
+          fi
+          git push origin main

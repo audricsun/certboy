@@ -1,12 +1,10 @@
 name: Documentation
 
+# Only deploys documentation on tag push
 on:
   push:
-    branches:
-      - master
-      - main
-  release:
-    types: [published]
+    tags:
+      - '**'
   workflow_dispatch:
 
 permissions:
