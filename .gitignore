@@ -44,3 +44,4 @@ cobertura-coverage.xml
 test_output.txt
 
 .cargo/
+site/

@@ -862,6 +862,27 @@ fn display_certificate_tree(
         return Ok(());
     }
 
+    let mut i = 0;
+    while i < root_cas.len() {
+        let cert_path = root_cas[i].path.clone();
+
+        if let Some(parent_path) = cert_path.parent().and_then(|p| p.parent()) {
+            let parent_crt = parent_path.join("crt.pem");
+            if parent_crt.exists() && parent_crt != cert_path {
+                if let Some(parent_name) = parent_path.file_name().and_then(|n| n.to_str()) {
+                    let mut nested_cert = root_cas.remove(i);
+                    nested_cert.parent = Some(parent_name.to_string());
+                    icas_by_root
+                        .entry(parent_name.to_string())
+                        .or_default()
+                        .push(nested_cert);
+                    continue;
+                }
+            }
+        }
+        i += 1;
+    }
+
     // Sort roots for consistent output
     root_cas.sort_by(|a, b| a.domain.cmp(&b.domain));
 
