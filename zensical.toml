@@ -6,6 +6,10 @@ docs_dir = "docs"
 site_dir = "site"
 dev_addr = "localhost:8000"
 
+[project.extra]
+icon = "docs/images/logo.png"
+icon_alpha = true
+
 [project.theme]
 features = [
     "navigation.sections",

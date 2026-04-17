@@ -1,5 +1,7 @@
 # Certboy
 
+<div align="center"><img src="images/logo.png" width="250"></div>
+
 Certboy is a Rust CLI for managing a local PKI (Public Key Infrastructure):
 
 - **Root CA** - Self-signed trust anchor
