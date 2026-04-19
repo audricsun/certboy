@@ -1,11 +1,10 @@
 name: CI Publish
 
-# Runs after multi-arch builds complete - downloads artifacts and publishes to GitHub/crates.io
+# Runs after CI Build completes on tag push - downloads artifacts and publishes to GitHub/crates.io
 on:
-  workflow_run:
-    workflows: ["CI Build"]
-    types: [completed]
-    branches: [main]
+  push:
+    tags:
+      - '**'
 
 permissions:
   contents: write
