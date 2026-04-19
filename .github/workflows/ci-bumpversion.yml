@@ -55,10 +55,8 @@ jobs:
           echo "Current version: $CURRENT_VERSION"
           echo "New version: v$NEXT_VERSION"
 
-          # Run bumpver (skip cargo check that 'make bump' would do)
           bumpver update $BUMP_ARGS --allow-dirty --no-push --no-fetch
-
-          # Amend commit if Cargo.lock changed (same logic as make bump)
+          cargo check
           if git diff --quiet HEAD -- Cargo.lock; then
             echo "Cargo.lock unchanged — not amending"
           else
