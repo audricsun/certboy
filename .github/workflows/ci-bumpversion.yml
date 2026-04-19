@@ -5,8 +5,8 @@ on:
   push:
     branches:
       - main
-    paths:
-      - '!VERSION'
+    paths-ignore:
+      - 'VERSION'
 
 permissions:
   contents: write
