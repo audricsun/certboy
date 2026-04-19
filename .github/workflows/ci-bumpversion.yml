@@ -36,7 +36,29 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           python -m pip install --upgrade pip
           python -m pip install bumpver
-          make bump BUMP_TYPE=build
+
+          # Determine bump args based on current version
+          # Bump_type=build: --patch --tag=dev (or --tag-num if already dev)
+          CURRENT_VERSION=$(cat VERSION)
+          if echo "$CURRENT_VERSION" | grep -q '\-dev\.[0-9]'; then
+            BUMP_ARGS="--tag-num"
+          else
+            BUMP_ARGS="--patch --tag=dev"
+          fi
+
+          # Calculate and display next version
+          NEXT_VERSION=$(bumpver update --dry $BUMP_ARGS 2>&1 | grep "New Version:" | awk '{print $NF}')
+          if [ -z "$NEXT_VERSION" ]; then
+            echo "Error: Could not calculate next version"
+            exit 1
+          fi
+          echo "Current version: $CURRENT_VERSION"
+          echo "New version: v$NEXT_VERSION"
+
+          # Run bumpver (skip cargo check that 'make bump' would do)
+          bumpver update $BUMP_ARGS --allow-dirty --no-push --no-fetch
+
+          # Amend commit if Cargo.lock changed (same logic as make bump)
           if git diff --quiet HEAD -- Cargo.lock; then
             echo "Cargo.lock unchanged — not amending"
           else
