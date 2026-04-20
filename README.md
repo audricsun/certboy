@@ -86,9 +86,25 @@ certboy check --renew
 - `LOGLEVEL`: default log level (`trace|debug|info|warn|error`)
 - `CERTBOY_CONTEXT`: default context path (equivalent to `--context`)
 
+## Documentation
+
+Full documentation available at: **[https://audricsun.github.io/certboy/](https://audricsun.github.io/certboy/)**
+
 ## Development
 
 ```bash
 cargo fmt
 cargo test
+```
+
+## Release Workflow
+
+Releases are automated. To trigger a release:
+
+```bash
+# Update VERSION to release version (e.g., 2026.4.1)
+# The ci-bumpversion workflow auto-bumps dev versions
+# The ci-git-tag workflow creates the git tag
+# The ci-build workflow builds multi-platform binaries
+# The ci-publish workflow creates GitHub Release and publishes to crates.io
 ```
