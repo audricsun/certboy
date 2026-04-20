@@ -1,7 +1,12 @@
-## [2026.4.3] - 2026-04-20
+## [2026.4.4] - 2026-04-20
+
+### 💼 Other
+
+- Bump version to 2026.4.3
 
 ### ⚙️ Miscellaneous Tasks
 
+- Improve ci workflow
 - Improve ci workflow
 ## [2026.4.2-dev0] - 2026-04-20
 
