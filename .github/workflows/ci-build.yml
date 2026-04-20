@@ -1,6 +1,6 @@
 name: CI Build
 
-# Runs on tag push only - multi-arch compilation
+# Runs on tag push only - multi-arch compilation + GitHub Release
 on:
   push:
     tags:
@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -215,3 +215,48 @@ jobs:
           path: |
             certboy-${{ env.VERSION }}-aarch64-unknown-linux-musl
             STABLE.txt
+
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [build, build-musl, build-darwin, build-arm-linux, build-arm-linux-musl]
+    if: always() && !cancelled()
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create Release
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION=$(cat VERSION)
+          tag="v${VERSION}"
+
+          git fetch --tags --force
+          if git ls-remote --tags origin "refs/tags/$tag" | grep -q "$tag"; then
+            echo "Tag exists: $tag — skipping"
+          else
+            git tag -a "$tag" -m "$tag"
+            git push origin "$tag"
+          fi
+
+          pip install --quiet git-cliff || true
+          if git-cliff --current --output /tmp/cliff_notes.md 2>&1; then
+            echo "Generated changelog"
+          else
+            echo "Release $tag" > /tmp/cliff_notes.md
+          fi
+
+          gh release create "$tag" dist/* --title "$tag" --notes-file /tmp/cliff_notes.md

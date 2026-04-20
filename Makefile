@@ -7,6 +7,8 @@
 #   make release       # Create formal release (with confirmation)
 #   make help          # Show all targets
 
+SHELL := /bin/bash
+
 # =============================================================================
 # Configuration
 # =============================================================================
@@ -132,9 +134,9 @@ release: check-deps ## Create formal release (prompts for confirmation)
 	echo "Current version: $(CURRENT_VERSION)" ; \
 	echo "Ready to release: v$$NEXT_VERSION" ; \
 	echo "" ; \
-	read -p "Proceed with release v$$NEXT_VERSION? (y/n) " -n 1 -r; \
+	read -p "Proceed with release v$$NEXT_VERSION? (y/n) " -n 1 -r REPLY; \
 	echo ""; \
-	if [[ ! $$REPLY =~ ^[Yy]$$ ]]; then \
+	if [[ ! "$$REPLY" =~ ^[Yy]$$ ]]; then \
 		echo "Release aborted."; \
 		exit 1; \
 	fi; \

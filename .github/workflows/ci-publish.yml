@@ -5,14 +5,20 @@ on:
     workflows: ["CI Build"]
     types: [completed]
 
+# Only run when CI Build succeeded (not on failure/cancelled)
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: write
   pull-requests: read
 
 jobs:
-  publish:
-    name: Publish Release
+  crates-publish:
+    name: Publish to crates.io
     runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     permissions:
       contents: write
     steps:
@@ -22,60 +28,9 @@ jobs:
           token: ${{ secrets.GH_PAT }}
           ref: ${{ github.event.workflow_run.head_sha }}
 
-      - name: Download artifacts from ci-build.yml
-        uses: actions/download-artifact@v4
-        with:
-          path: dist
-          merge-multiple: true
-          run-id: ${{ github.event.workflow_run.id }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Create GitHub Release
-        env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if [ ! -f VERSION ]; then
-            echo "ERROR: VERSION file not found"
-            exit 1
-          fi
-          VERSION=$(cat VERSION)
-          if [ -z "$VERSION" ]; then
-            echo "ERROR: VERSION file is empty"
-            exit 1
-          fi
-          tag="v${VERSION}"
-
-          if [ ! -d dist ] || [ -z "$(ls -A dist/ 2>/dev/null)" ]; then
-            echo "ERROR: dist/ directory empty or missing"
-            exit 1
-          fi
-
-          git fetch --tags --force
-          if git ls-remote --tags origin "refs/tags/$tag" | grep -q "$tag"; then
-            echo "Tag already exists: $tag — skipping"
-          else
-            git tag -a "$tag" -m "$tag"
-            git push origin "$tag"
-          fi
-
-          pip install --quiet git-cliff
-          if git-cliff --current --output /tmp/cliff_notes.md 2>&1; then
-            echo "Generated changelog via git-cliff for current tag"
-          else
-            echo "WARNING: git-cliff failed — using basic release notes"
-            echo "Release $tag" > /tmp/cliff_notes.md
-          fi
-
-          gh release create "$tag" dist/* --title "$tag" --notes-file /tmp/cliff_notes.md
-
       - name: Publish to crates.io
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
-          GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
