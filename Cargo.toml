@@ -1,6 +1,6 @@
 [package]
 name = "certboy"
-version = "2026.4.2-dev0"
+version = "2026.4.3"
 edition = "2021"
 authors = ["audric <audric.s@outlook.com>"]
 description = "yet-another-cert-manager"
