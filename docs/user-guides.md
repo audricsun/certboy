@@ -711,8 +711,42 @@ make audit
 ### GitHub Actions
 
 - **ci-tests.yml**: Runs on every push and PR
-- **ci-release.yml**: Runs on main branch pushes - builds, publishes, releases
+- **ci-build.yml**: Runs on tag push - builds multi-platform binaries (Linux gnu/musl, Darwin, ARM Linux)
+- **ci-publish.yml**: Runs after ci-build completes - creates GitHub Release and publishes to crates.io
 - **ci-pages.yml**: Builds and deploys documentation
+- **ci-bumpversion.yml**: Auto-bumps version on main branch pushes (dev builds)
+- **ci-git-tag.yml**: Creates git tags when VERSION file changes
+
+### Release Workflow
+
+Releases are automated via GitHub Actions:
+
+1. **Version Bump** (automatic): When `VERSION` file changes on main, `ci-bumpversion.yml` bumps the version and commits
+2. **Tag Creation**: `ci-git-tag.yml` creates a git tag (`v{version}`) when VERSION changes
+3. **Build**: `ci-build.yml` triggers on tag push, building for multiple platforms:
+   - `x86_64-unknown-linux-gnu`
+   - `x86_64-unknown-linux-musl`
+   - `aarch64-apple-darwin`
+   - `aarch64-unknown-linux-gnu`
+   - `aarch64-unknown-linux-musl`
+4. **Publish**: `ci-publish.yml` creates a GitHub Release with all artifacts and publishes to crates.io
+
+**Trigger a Release:**
+
+```bash
+# Update VERSION file to release version (removes -devN suffix)
+echo "2026.4.1" > VERSION
+git add VERSION
+git commit -m "release: 2026.4.1"
+git push origin main
+```
+
+**Version Scheme:**
+
+| Type | Format | Example |
+|------|--------|---------|
+| Dev build | `YYYY.M.PATCH-devN` | `2026.4.1-dev0`, `2026.4.1-dev1` |
+| Release | `YYYY.M.PATCH` | `2026.4.1` |
 
 ### Documentation
 

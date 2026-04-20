@@ -1,6 +1,6 @@
 [bumpver]
-current_version = "2026.16.49"
-version_pattern = "GGGG.VV.PATCH"
+current_version = "2026.4.1-dev0"
+version_pattern = "YYYY.MM.PATCH[-TAGNUM]"
 commit_message = "bump version to {new_version}"
 tag_message = "v{new_version}"
 commit = true

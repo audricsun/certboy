@@ -86,9 +86,45 @@ certboy check --renew
 - `LOGLEVEL`: default log level (`trace|debug|info|warn|error`)
 - `CERTBOY_CONTEXT`: default context path (equivalent to `--context`)
 
+## Documentation
+
+Full documentation available at: **[https://audricsun.github.io/certboy/](https://audricsun.github.io/certboy/)**
+
 ## Development
 
 ```bash
 cargo fmt
 cargo test
 ```
+
+## Release Workflow
+
+Releases are automated. To trigger a release:
+
+```bash
+# Update VERSION to release version (e.g., 2026.4.1)
+# The ci-bumpversion workflow auto-bumps dev versions
+# The ci-git-tag workflow creates the git tag
+# The ci-build workflow builds multi-platform binaries
+# The ci-publish workflow creates GitHub Release and publishes to crates.io
+```
+
+## Built With
+
+- [Rust](https://www.rust-lang.org/) - Language
+- [OpenSSL](https://www.openssl.org/) - Cryptography (vendored)
+- [clap](https://github.com/clap-rs/clap) - CLI argument parsing
+- [tokio](https://tokio.rs/) - Async runtime
+- [tracing](https://tokio.rs/blog/tracing) - Structured logging
+- [serde](https://serde.rs/) - Serialization
+- [chrono](https://crates.io/crates/chrono) - Date/time
+
+### Dev Tools
+
+- [cargo-nextest](https://nextest.rs/) - Test runner
+- [cargo-llvm-cov](https://github.com/taiki-e/cargo-llvm-cov) - Code coverage
+- [cargo-audit](https://rustsec.org/) - Security auditing
+- [git-cliff](https://github.com/orf/git-cliff) - Changelog generation
+- [bumpver](https://github.com/mbarkhau/bumpver) - Version bumping
+- [zensical](https://github.com/nicowillis/zensical) - Documentation generator
+- [cross](https://github.com/cross-rs/cross) - Cross-compilation
