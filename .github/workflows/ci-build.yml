@@ -21,20 +21,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-        with:
-          token: ${{ secrets.GH_PAT }}
-      - name: Create and push version tag
-        env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          VERSION=$(cat VERSION)
-          tag="v${VERSION}"
-          git tag -a "$tag" -m "$tag"
-          git push origin "$tag"
       - name: Set VERSION
         run: echo "VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@stable
@@ -72,20 +58,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-        with:
-          token: ${{ secrets.GH_PAT }}
-      - name: Create and push version tag
-        env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          VERSION=$(cat VERSION)
-          tag="v${VERSION}"
-          git tag -a "$tag" -m "$tag"
-          git push origin "$tag"
       - name: Set VERSION
         run: echo "VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@stable
@@ -125,20 +97,6 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v5
-        with:
-          token: ${{ secrets.GH_PAT }}
-      - name: Create and push version tag
-        env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          VERSION=$(cat VERSION)
-          tag="v${VERSION}"
-          git tag -a "$tag" -m "$tag"
-          git push origin "$tag"
       - name: Set VERSION
         run: echo "VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@stable
@@ -177,20 +135,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-        with:
-          token: ${{ secrets.GH_PAT }}
-      - name: Create and push version tag
-        env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          VERSION=$(cat VERSION)
-          tag="v${VERSION}"
-          git tag -a "$tag" -m "$tag"
-          git push origin "$tag"
       - name: Set VERSION
         run: echo "VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@stable
@@ -233,20 +177,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-        with:
-          token: ${{ secrets.GH_PAT }}
-      - name: Create and push version tag
-        env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          VERSION=$(cat VERSION)
-          tag="v${VERSION}"
-          git tag -a "$tag" -m "$tag"
-          git push origin "$tag"
       - name: Set VERSION
         run: echo "VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@stable
@@ -282,14 +212,12 @@ jobs:
     name: Create GitHub Release
     runs-on: ubuntu-latest
     needs: [build, build-musl, build-darwin, build-arm-linux, build-arm-linux-musl]
-    if: always() && !cancelled()
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-          token: ${{ secrets.GH_PAT }}
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -305,14 +233,6 @@ jobs:
           set -euo pipefail
           VERSION=$(cat VERSION)
           tag="v${VERSION}"
-
-          git fetch --tags --force
-          if git ls-remote --tags origin "refs/tags/$tag" | grep -q "$tag"; then
-            echo "Tag exists: $tag — skipping"
-          else
-            git tag -a "$tag" -m "$tag"
-            git push origin "$tag"
-          fi
 
           pip install --quiet git-cliff || true
           if git-cliff --current --output /tmp/cliff_notes.md 2>&1; then
