@@ -1,40 +1,27 @@
 name: CI Publish
 
 on:
-  workflow_run:
-    workflows: ["CI Build"]
-    types: [completed]
+  push:
+    branches:
+      - main
+    paths:
+      - 'VERSION'
 
-# Only run when CI Build succeeded (not on failure/cancelled)
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
 permissions:
-  contents: write
-  pull-requests: read
+  contents: read
 
 jobs:
   crates-publish:
     name: Publish to crates.io
     runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-          token: ${{ secrets.GH_PAT }}
-          ref: ${{ github.event.workflow_run.head_sha }}
 
       - name: Publish to crates.io
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Cargo.lock
-          git diff --cached --quiet || git commit -m "chore: update Cargo.lock"
-          cargo publish --allow-dirty
+        run: cargo publish

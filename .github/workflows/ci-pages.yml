@@ -1,11 +1,12 @@
 name: Documentation
 
-# Only deploys documentation on tag push
+# Deploys documentation when VERSION file changes on main
 on:
   push:
-    tags:
-      - '**'
-  workflow_dispatch:
+    branches:
+      - main
+    paths:
+      - 'VERSION'
 
 permissions:
   contents: read

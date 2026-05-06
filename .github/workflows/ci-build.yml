@@ -1,10 +1,12 @@
 name: CI Build
 
-# Runs on tag push only - multi-arch compilation + GitHub Release
+# Runs on VERSION file change on main - multi-arch compilation + GitHub Release
 on:
   push:
-    tags:
-      - '**'
+    branches:
+      - main
+    paths:
+      - 'VERSION'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -19,8 +21,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-        with:
-          token: ${{ secrets.GH_PAT }}
       - name: Set VERSION
         run: echo "VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@stable
@@ -58,8 +58,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-        with:
-          token: ${{ secrets.GH_PAT }}
       - name: Set VERSION
         run: echo "VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@stable
@@ -99,8 +97,6 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v5
-        with:
-          token: ${{ secrets.GH_PAT }}
       - name: Set VERSION
         run: echo "VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@stable
@@ -139,8 +135,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-        with:
-          token: ${{ secrets.GH_PAT }}
       - name: Set VERSION
         run: echo "VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@stable
@@ -183,8 +177,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-        with:
-          token: ${{ secrets.GH_PAT }}
       - name: Set VERSION
         run: echo "VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@stable
@@ -220,14 +212,12 @@ jobs:
     name: Create GitHub Release
     runs-on: ubuntu-latest
     needs: [build, build-musl, build-darwin, build-arm-linux, build-arm-linux-musl]
-    if: always() && !cancelled()
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-          token: ${{ secrets.GH_PAT }}
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -243,14 +233,6 @@ jobs:
           set -euo pipefail
           VERSION=$(cat VERSION)
           tag="v${VERSION}"
-
-          git fetch --tags --force
-          if git ls-remote --tags origin "refs/tags/$tag" | grep -q "$tag"; then
-            echo "Tag exists: $tag — skipping"
-          else
-            git tag -a "$tag" -m "$tag"
-            git push origin "$tag"
-          fi
 
           pip install --quiet git-cliff || true
           if git-cliff --current --output /tmp/cliff_notes.md 2>&1; then
