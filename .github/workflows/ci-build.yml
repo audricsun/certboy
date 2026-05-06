@@ -1,10 +1,12 @@
 name: CI Build
 
-# Runs on tag push only - multi-arch compilation + GitHub Release
+# Runs on VERSION file change on main - multi-arch compilation + GitHub Release
 on:
   push:
-    tags:
-      - '**'
+    branches:
+      - main
+    paths:
+      - 'VERSION'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -21,6 +23,18 @@ jobs:
       - uses: actions/checkout@v5
         with:
           token: ${{ secrets.GH_PAT }}
+      - name: Create and push version tag
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          VERSION=$(cat VERSION)
+          tag="v${VERSION}"
+          git tag -a "$tag" -m "$tag"
+          git push origin "$tag"
       - name: Set VERSION
         run: echo "VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@stable
@@ -60,6 +74,18 @@ jobs:
       - uses: actions/checkout@v5
         with:
           token: ${{ secrets.GH_PAT }}
+      - name: Create and push version tag
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          VERSION=$(cat VERSION)
+          tag="v${VERSION}"
+          git tag -a "$tag" -m "$tag"
+          git push origin "$tag"
       - name: Set VERSION
         run: echo "VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@stable
@@ -101,6 +127,18 @@ jobs:
       - uses: actions/checkout@v5
         with:
           token: ${{ secrets.GH_PAT }}
+      - name: Create and push version tag
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          VERSION=$(cat VERSION)
+          tag="v${VERSION}"
+          git tag -a "$tag" -m "$tag"
+          git push origin "$tag"
       - name: Set VERSION
         run: echo "VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@stable
@@ -141,6 +179,18 @@ jobs:
       - uses: actions/checkout@v5
         with:
           token: ${{ secrets.GH_PAT }}
+      - name: Create and push version tag
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          VERSION=$(cat VERSION)
+          tag="v${VERSION}"
+          git tag -a "$tag" -m "$tag"
+          git push origin "$tag"
       - name: Set VERSION
         run: echo "VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@stable
@@ -185,6 +235,18 @@ jobs:
       - uses: actions/checkout@v5
         with:
           token: ${{ secrets.GH_PAT }}
+      - name: Create and push version tag
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          VERSION=$(cat VERSION)
+          tag="v${VERSION}"
+          git tag -a "$tag" -m "$tag"
+          git push origin "$tag"
       - name: Set VERSION
         run: echo "VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@stable

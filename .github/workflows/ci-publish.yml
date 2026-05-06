@@ -1,11 +1,11 @@
 name: CI Publish
 
 on:
-  workflow_run:
-    workflows: ["CI Build"]
-    types: [completed]
-
-# Only run when CI Build succeeded (not on failure/cancelled)
+  push:
+    branches:
+      - main
+    paths:
+      - 'VERSION'
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
@@ -18,7 +18,6 @@ jobs:
   crates-publish:
     name: Publish to crates.io
     runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     permissions:
       contents: write
     steps:
@@ -26,7 +25,6 @@ jobs:
         with:
           fetch-depth: 0
           token: ${{ secrets.GH_PAT }}
-          ref: ${{ github.event.workflow_run.head_sha }}
 
       - name: Publish to crates.io
         env:
