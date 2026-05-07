@@ -90,7 +90,7 @@ After creating a Root CA, the context directory contains:
     ├── key.pem            # Private key (encrypted if --encrypt-key)
     ├── pass.key           # Encryption passphrase (if applicable)
     ├── intermediates.d/   # Intermediate CAs directory
-    └── certs.d/           # TLS certificates directory
+    └── certificates.d/           # TLS certificates directory
 ```
 
 ---
@@ -228,14 +228,15 @@ certboy --ca example.com -d www.example.com --encrypt-key
 
 ### Certificate Chain
 
-TLS certificates issued by an ICA include the full certificate chain in `fullchain.crt`:
+TLS certificates issued by an ICA include the certificate chain in `fullchain.crt`:
 
 ```
 fullchain.crt
 ├── TLS certificate (www.example.com)
-├── Intermediate CA certificate (ops.example.com)
-└── Root CA certificate (example.com)
+└── Intermediate CA certificate (ops.example.com)
 ```
+
+Note: Root CA certificates are not included in the fullchain. The client must have the Root CA in its trust store separately.
 
 ### Expiration
 
@@ -546,7 +547,7 @@ export CERTBOY_CONTEXT=/path/to/context
 │   ├── crt.pem
 │   ├── key.pem
 │   ├── intermediates.d/     # Intermediate CAs
-│   └── certs.d/             # TLS certificates
+│   └── certificates.d/             # TLS certificates
 └── another.com/             # Another Root CA
 ```
 
