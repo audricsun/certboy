@@ -2426,11 +2426,7 @@ async fn test_verify_key_cert_match_ecdsa() {
         .join("certificates.d")
         .join("www.test-verify-ec.local");
     let (is_valid, msg) = utils::verify_key_cert_match(&cert_dir).unwrap();
-    assert!(
-        is_valid,
-        "ECDSA key and cert should match: {}",
-        msg
-    );
+    assert!(is_valid, "ECDSA key and cert should match: {}", msg);
 
     drop(tmp);
 }
@@ -2478,8 +2474,7 @@ async fn test_revoke_tls_certificate() {
     assert!(cert_dir.exists());
 
     // Revoke with skip_confirm=true
-    let result =
-        utils::revoke_certificate(&temp_dir_path, "www.test-revoke.local", true).await;
+    let result = utils::revoke_certificate(&temp_dir_path, "www.test-revoke.local", true).await;
     assert!(result.is_ok());
     assert!(
         !cert_dir.exists(),
@@ -2551,8 +2546,7 @@ async fn test_revoke_ica_cascading() {
     assert!(ica_dir.exists());
 
     // Revoke the ICA
-    let result =
-        utils::revoke_certificate(&temp_dir_path, "ops.test-revoke-ica.local", true).await;
+    let result = utils::revoke_certificate(&temp_dir_path, "ops.test-revoke-ica.local", true).await;
     assert!(result.is_ok());
     assert!(
         !ica_dir.exists(),
@@ -2609,8 +2603,7 @@ async fn test_revoke_root_ca_cascading() {
     assert!(root_dir.exists());
 
     // Revoke the entire root CA
-    let result =
-        utils::revoke_certificate(&temp_dir_path, "test-revoke-root.local", true).await;
+    let result = utils::revoke_certificate(&temp_dir_path, "test-revoke-root.local", true).await;
     assert!(result.is_ok());
     assert!(
         !root_dir.exists(),
@@ -2629,14 +2622,9 @@ async fn test_revoke_nonexistent_domain() {
 
     fs::create_dir_all(&temp_dir_path).unwrap();
     // Write empty global metadata so the context is valid
-    utils::write_global_metadata(
-        &temp_dir_path,
-        &utils::GlobalCertMetadata::new(),
-    )
-    .unwrap();
+    utils::write_global_metadata(&temp_dir_path, &utils::GlobalCertMetadata::new()).unwrap();
 
-    let result =
-        utils::revoke_certificate(&temp_dir_path, "nonexistent.local", true).await;
+    let result = utils::revoke_certificate(&temp_dir_path, "nonexistent.local", true).await;
     assert!(result.is_err());
     assert!(
         result.unwrap_err().to_string().contains("not found"),
@@ -2699,8 +2687,7 @@ async fn test_export_ica_signed_certificate() {
     let original_cwd = std::env::current_dir().unwrap();
     std::env::set_current_dir(&export_dir).unwrap();
 
-    let export_result =
-        utils::export_certificate(&temp_dir_path, "www.ops.test-export-ica.local");
+    let export_result = utils::export_certificate(&temp_dir_path, "www.ops.test-export-ica.local");
     assert!(export_result.is_ok());
 
     // Should export fullchain.crt (not just crt.pem) for ICA-signed certs
@@ -2817,8 +2804,7 @@ async fn test_find_tls_certs_signed_by_cn_mismatch() {
     .unwrap();
 
     // Now finds certs via metadata parent field even when CN != domain
-    let certs =
-        utils::find_tls_certs_signed_by(&temp_dir_path, "test-find-bug.local").unwrap();
+    let certs = utils::find_tls_certs_signed_by(&temp_dir_path, "test-find-bug.local").unwrap();
     assert_eq!(
         certs.len(),
         1,
@@ -3114,31 +3100,26 @@ async fn test_remove_from_global_metadata() {
 
     // Verify it's in metadata
     let meta = utils::read_global_metadata(&temp_dir_path).unwrap();
-    assert!(
-        meta.certificates
-            .iter()
-            .any(|c| c.domain == "www.test-meta-rm.local")
-    );
+    assert!(meta
+        .certificates
+        .iter()
+        .any(|c| c.domain == "www.test-meta-rm.local"));
 
     // Remove it
     utils::remove_from_global_metadata(&temp_dir_path, "www.test-meta-rm.local").unwrap();
 
     // Verify it's gone
     let meta_after = utils::read_global_metadata(&temp_dir_path).unwrap();
-    assert!(
-        !meta_after
-            .certificates
-            .iter()
-            .any(|c| c.domain == "www.test-meta-rm.local")
-    );
+    assert!(!meta_after
+        .certificates
+        .iter()
+        .any(|c| c.domain == "www.test-meta-rm.local"));
 
     // Root CA should still be there
-    assert!(
-        meta_after
-            .certificates
-            .iter()
-            .any(|c| c.domain == "test-meta-rm.local")
-    );
+    assert!(meta_after
+        .certificates
+        .iter()
+        .any(|c| c.domain == "test-meta-rm.local"));
 
     drop(tmp);
 }
@@ -3842,10 +3823,7 @@ async fn test_list_certificates_with_detail_and_sans() {
         "www.detail-san.local",
         "detail-san.local",
         false,
-        Some(&[
-            "api.detail-san.local".to_string(),
-            "127.0.0.1".to_string(),
-        ]),
+        Some(&["api.detail-san.local".to_string(), "127.0.0.1".to_string()]),
         None,
         false,
     )
@@ -4492,7 +4470,10 @@ async fn test_export_certificate_missing_key() {
 
     let result = utils::export_certificate(&temp_dir_path, "www.exp-nokey.local");
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("Key file not found"));
+    assert!(result
+        .unwrap_err()
+        .to_string()
+        .contains("Key file not found"));
 
     drop(tmp);
 }
@@ -5151,7 +5132,10 @@ async fn test_cli_check_all_flags() {
         "www.ops.all-flags.local",
         "ops.all-flags.local",
         false,
-        Some(&["api.ops.all-flags.local".to_string(), "10.0.0.1".to_string()]),
+        Some(&[
+            "api.ops.all-flags.local".to_string(),
+            "10.0.0.1".to_string(),
+        ]),
         None,
         false,
     )

@@ -1464,9 +1464,7 @@ pub fn verify_key_cert_match(cert_dir: &Path) -> Result<(bool, String)> {
         .unwrap_or(false);
 
     let mut key_cmd = std::process::Command::new("openssl");
-    key_cmd
-        .args(["pkey", "-pubout", "-in"])
-        .arg(&*key_path_str);
+    key_cmd.args(["pkey", "-pubout", "-in"]).arg(&*key_path_str);
 
     if is_encrypted {
         if pass_path.exists() {
@@ -1862,7 +1860,10 @@ pub fn find_tls_certs_signed_by(context: &Path, ca_domain: &str) -> Result<Vec<C
                     let issuer_cn = get_cn_from_name(cert.issuer_name());
                     let path_str = path.to_string_lossy();
                     let is_under_ca = path_str.contains(&format!("/{}/certificates.d/", ca_domain))
-                        || path_str.contains(&format!("/{}/intermediates.d/{}/certificates.d/", ca_domain, ca_domain));
+                        || path_str.contains(&format!(
+                            "/{}/intermediates.d/{}/certificates.d/",
+                            ca_domain, ca_domain
+                        ));
 
                     if issuer_cn == ca_domain || is_under_ca {
                         let subject = cert
@@ -1874,11 +1875,7 @@ pub fn find_tls_certs_signed_by(context: &Path, ca_domain: &str) -> Result<Vec<C
                                     .as_utf8()
                                     .map(|d| d.to_string())
                                     .unwrap_or_else(|_| "<non-utf8>".to_string());
-                                format!(
-                                    "{}={}",
-                                    e.object().nid().short_name().unwrap_or("?"),
-                                    val
-                                )
+                                format!("{}={}", e.object().nid().short_name().unwrap_or("?"), val)
                             })
                             .collect::<Vec<_>>()
                             .join(", ");
@@ -3675,6 +3672,25 @@ pub fn init_git_repo(context: &Path) -> Result<()> {
             return Ok(());
         }
     }
+
+    // Configure local git identity if not set (needed for CI environments)
+    let _ = std::process::Command::new("git")
+        .args(["config", "user.email"])
+        .current_dir(context)
+        .output()
+        .and_then(|out| {
+            if !out.status.success() || out.stdout.is_empty() {
+                std::process::Command::new("git")
+                    .args(["config", "user.email", "certboy@localhost"])
+                    .current_dir(context)
+                    .output()?;
+                std::process::Command::new("git")
+                    .args(["config", "user.name", "certboy"])
+                    .current_dir(context)
+                    .output()?;
+            }
+            Ok(out)
+        });
 
     // Create .gitignore to exclude private keys
     let gitignore_content = r#"# Private keys - NEVER commit these
