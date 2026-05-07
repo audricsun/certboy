@@ -1,14 +1,36 @@
+## [2026.5.1] - 2026-05-07
+
+### 🐛 Bug Fixes
+
+- Fix broken badges and add coverage badge via shields.io
+
+### 💼 Other
+
+- Merge pull request #38 from audricsun/chore/fix-doc-badge
+
+fix: fix broken badges and add coverage badge via shields.io
+
+### 📚 Documentation
+
+- Fix outdated directory names and broken links
+- Add crates.io link to documentation
+- Remove broken coverage badge and redundant sections from README
 ## [2026.5.0] - 2026-05-07
 
 ### 🐛 Bug Fixes
 
 - Improve test coverage to 88.77% and fix two design bugs
+- Configure git identity in init_git_repo for CI environments
 
 ### 💼 Other
 
 - Merge pull request #36 from audricsun/ci/fix-ci-issue
 
 ci: fix ci issue with bumpversion - deadloop
+- Bump version to 2026.5.0
+- Merge pull request #37 from audricsun/test/improve-unittest-coverage
+
+fix: improve test coverage to 88.77% and fix two design bugs
 
 ### ⚙️ Miscellaneous Tasks
 
