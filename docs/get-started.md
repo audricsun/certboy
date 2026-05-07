@@ -21,7 +21,7 @@ For other architectures (Linux ARM64, macOS Intel, macOS Apple Silicon), see the
 
 ### Install with Cargo
 
-If you have Rust installed:
+If you have Rust installed ([crates.io page](https://crates.io/crates/certboy)):
 
 ```bash
 cargo install certboy
