@@ -3,7 +3,6 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/audricsun/certboy/ci-tests.yml?label=CI)](https://github.com/audricsun/certboy/actions)
 [![Build](https://img.shields.io/github/actions/workflow/status/audricsun/certboy/ci-build.yml?label=Build)](https://github.com/audricsun/certboy/actions)
 [![Pages](https://img.shields.io/github/actions/workflow/status/audricsun/certboy/ci-pages.yml?label=Pages)](https://github.com/audricsun/certboy/actions)
-[![Coverage](https://img.shields.io/endpoint?url=https://audricsun.github.io/certboy/coverage-badge.json)](https://github.com/audricsun/certboy/actions)
 [![crates.io](https://img.shields.io/crates/v/certboy)](https://crates.io/crates/certboy)
 [![Rust](https://img.shields.io/badge/rust-1.75%2B-orange?logo=rust)](https://rustup.rs/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -100,22 +99,7 @@ Full documentation available at: **[https://audricsun.github.io/certboy/](https:
 
 ## Development
 
-```bash
-cargo fmt
-cargo test
-```
-
-## Release Workflow
-
-Releases are automated. To trigger a release:
-
-```bash
-# Update VERSION to release version (e.g., 2026.4.1)
-# The ci-bumpversion workflow auto-bumps dev versions
-# The ci-git-tag workflow creates the git tag
-# The ci-build workflow builds multi-platform binaries
-# The ci-publish workflow creates GitHub Release and publishes to crates.io
-```
+For development workflow, CI/CD, and release process, see the [documentation](https://audricsun.github.io/certboy/).
 
 ## Built With
 
