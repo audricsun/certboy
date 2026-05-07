@@ -67,6 +67,5 @@ After running the script, explore the `sandbox/` directory to see the complete P
 
 ## Next Steps
 
-- [User Guides](user-guides/index.md) - Detailed guides for all features
-- [CLI Reference](user-guides/reference.md) - Complete command reference
+- [User Guides](user-guides.md) - Detailed guides for all features
 - [GitHub Repository](https://github.com/audricsun/certboy) - Report issues and contribute

@@ -20,8 +20,7 @@ Certboy is a Rust CLI for managing a local PKI (Public Key Infrastructure):
 ## Quick Links
 
 - [Get Started](get-started.md) - Installation and quickstart guide
-- [User Guides](user-guides/index.md) - Detailed guides for each feature
-- [CLI Reference](reference/index.md) - Complete command reference
+- [User Guides](user-guides.md) - Detailed guides for each feature
 
 ## Disclaimer
 
