@@ -94,6 +94,17 @@ jobs:
           badge: true
           fail_below_min: 70
           thresholds: '80'
+      - name: Generate coverage badge JSON
+        if: github.ref == 'refs/heads/main'
+        run: |
+          COVERAGE=$(grep -oP 'line-rate="\K[^"]+' target/llvm-cov-target/cobertura.xml | head -1)
+          PERCENT=$(echo "$COVERAGE * 100" | bc | xargs printf "%.1f")
+          if (( $(echo "$PERCENT >= 90" | bc -l) )); then COLOR="brightgreen"
+          elif (( $(echo "$PERCENT >= 80" | bc -l) )); then COLOR="green"
+          elif (( $(echo "$PERCENT >= 70" | bc -l) )); then COLOR="yellow"
+          else COLOR="red"; fi
+          mkdir -p target/badge
+          echo "{\"schemaVersion\":1,\"label\":\"coverage\",\"message\":\"${PERCENT}%\",\"color\":\"${COLOR}\"}" > target/badge/coverage-badge.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -102,6 +113,11 @@ jobs:
             target/nextest/ci/junit.xml
             target/llvm-cov-target/cobertura.xml
             target/html/
+      - uses: actions/upload-artifact@v4
+        if: github.ref == 'refs/heads/main'
+        with:
+          name: coverage-badge
+          path: target/badge/coverage-badge.json
 
   e2e:
     name: e2e (quickstart)
