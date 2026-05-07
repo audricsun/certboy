@@ -1,8 +1,29 @@
-## [2026.4.4] - 2026-04-20
+## [2026.5.0] - 2026-05-07
+
+### 🐛 Bug Fixes
+
+- Improve test coverage to 88.77% and fix two design bugs
+
+### 💼 Other
+
+- Merge pull request #36 from audricsun/ci/fix-ci-issue
+
+ci: fix ci issue with bumpversion - deadloop
+
+### ⚙️ Miscellaneous Tasks
+
+- Update gitignore file
+- Update actions
+## [2026.4.5-dev0] - 2026-04-20
 
 ### 💼 Other
 
 - Bump version to 2026.4.3
+- Bump version to 2026.4.4
+- Merge pull request #34 from audricsun/chore/improve-ci-worflow
+
+Chore/improve ci worflow
+- Bump version to 2026.4.5-dev0
 
 ### ⚙️ Miscellaneous Tasks
 
