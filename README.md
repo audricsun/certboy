@@ -3,6 +3,7 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/audricsun/certboy/ci-tests.yml?label=CI)](https://github.com/audricsun/certboy/actions)
 [![Build](https://img.shields.io/github/actions/workflow/status/audricsun/certboy/ci-build.yml?label=Build)](https://github.com/audricsun/certboy/actions)
 [![Pages](https://img.shields.io/github/actions/workflow/status/audricsun/certboy/ci-pages.yml?label=Pages)](https://github.com/audricsun/certboy/actions)
+[![Coverage](https://img.shields.io/endpoint?url=https://audricsun.github.io/certboy/coverage-badge.json)](https://github.com/audricsun/certboy/actions)
 [![crates.io](https://img.shields.io/crates/v/certboy)](https://crates.io/crates/certboy)
 [![Rust](https://img.shields.io/badge/rust-1.75%2B-orange?logo=rust)](https://rustup.rs/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
