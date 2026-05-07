@@ -1464,9 +1464,7 @@ pub fn verify_key_cert_match(cert_dir: &Path) -> Result<(bool, String)> {
         .unwrap_or(false);
 
     let mut key_cmd = std::process::Command::new("openssl");
-    key_cmd
-        .args(["rsa", "-modulus", "-noout", "-in"])
-        .arg(&*key_path_str);
+    key_cmd.args(["pkey", "-pubout", "-in"]).arg(&*key_path_str);
 
     if is_encrypted {
         if pass_path.exists() {
@@ -1500,51 +1498,39 @@ pub fn verify_key_cert_match(cert_dir: &Path) -> Result<(bool, String)> {
         }
     }
 
-    debug!(
-        "  openssl: openssl rsa -modulus -noout -in {}",
-        key_path_str
-    );
-    let key_modulus = key_cmd.output();
+    debug!("  openssl: openssl pkey -pubout -in {}", key_path_str);
+    let key_pubkey = key_cmd.output();
 
     debug!(
-        "  openssl: openssl x509 -modulus -noout -in {}",
+        "  openssl: openssl x509 -pubkey -noout -in {}",
         crt_path_str
     );
-    let cert_modulus = std::process::Command::new("openssl")
-        .args(["x509", "-modulus", "-noout", "-in"])
+    let cert_pubkey = std::process::Command::new("openssl")
+        .args(["x509", "-pubkey", "-noout", "-in"])
         .arg(&*crt_path_str)
         .output();
 
-    match (key_modulus, cert_modulus) {
+    match (key_pubkey, cert_pubkey) {
         (Ok(key_out), Ok(cert_out)) => {
-            let key_status = key_out.status;
-            let cert_status = cert_out.status;
-
-            if !key_status.success() {
+            if !key_out.status.success() {
                 let err = String::from_utf8_lossy(&key_out.stderr);
                 debug!("  openssl: key.pem invalid: {}", err.trim());
                 return Ok((false, format!("key.pem is invalid: {}", err.trim())));
             }
-            if !cert_status.success() {
+            if !cert_out.status.success() {
                 let err = String::from_utf8_lossy(&cert_out.stderr);
                 debug!("  openssl: crt.pem invalid: {}", err.trim());
                 return Ok((false, format!("crt.pem is invalid: {}", err.trim())));
             }
 
-            let key_mod = String::from_utf8_lossy(&key_out.stdout).trim().to_string();
-            let cert_mod = String::from_utf8_lossy(&cert_out.stdout).trim().to_string();
+            let key_pub = String::from_utf8_lossy(&key_out.stdout).trim().to_string();
+            let cert_pub = String::from_utf8_lossy(&cert_out.stdout).trim().to_string();
 
-            debug!(
-                "  openssl: key modulus = {}..., cert modulus = {}...",
-                &key_mod[..8.min(key_mod.len())],
-                &cert_mod[..8.min(cert_mod.len())]
-            );
-
-            if key_mod == cert_mod {
-                debug!("  openssl: moduli match");
+            if key_pub == cert_pub {
+                debug!("  openssl: public keys match");
                 Ok((true, "key and certificate match".to_string()))
             } else {
-                debug!("  openssl: moduli DO NOT MATCH");
+                debug!("  openssl: public keys DO NOT MATCH");
                 Ok((false, "key and certificate DO NOT MATCH".to_string()))
             }
         }
@@ -1787,8 +1773,67 @@ pub fn export_certificate(context: &Path, domain: &str) -> Result<()> {
 /// Find all TLS certificates signed by a given CA (Root or ICA)
 pub fn find_tls_certs_signed_by(context: &Path, ca_domain: &str) -> Result<Vec<CertificateInfo>> {
     let mut certs = Vec::new();
+    let mut found_domains = std::collections::HashSet::new();
 
-    // Walk through all directories to find TLS certificates
+    // First, check global metadata for parent/signing_ca matches
+    if let Ok(global) = read_global_metadata(context) {
+        for meta in &global.certificates {
+            if meta.cert_type != CertificateType::Tls {
+                continue;
+            }
+            let is_match = meta.parent.as_deref() == Some(ca_domain)
+                || meta.signing_ca.as_deref() == Some(ca_domain);
+            if is_match {
+                if let Some(path) = find_cert_path(context, &meta.domain, &CertificateType::Tls) {
+                    if let Ok(pem) = fs::read(&path) {
+                        if let Ok(cert) = X509::from_pem(&pem) {
+                            let domain = meta.domain.clone();
+                            let subject = cert
+                                .subject_name()
+                                .entries()
+                                .map(|e| {
+                                    let val = e
+                                        .data()
+                                        .as_utf8()
+                                        .map(|d| d.to_string())
+                                        .unwrap_or_else(|_| "<non-utf8>".to_string());
+                                    format!(
+                                        "{}={}",
+                                        e.object().nid().short_name().unwrap_or("?"),
+                                        val
+                                    )
+                                })
+                                .collect::<Vec<_>>()
+                                .join(", ");
+
+                            let not_before = cert.not_before().to_string();
+                            let not_after = cert.not_after().to_string();
+                            let expires_in_days = calculate_days_until_expiry(&not_after);
+
+                            found_domains.insert(domain.clone());
+                            certs.push(CertificateInfo {
+                                path: path.to_path_buf(),
+                                domain,
+                                cert_type: CertificateType::Tls,
+                                issuer: get_cn_from_name(cert.issuer_name()),
+                                subject,
+                                not_before,
+                                not_after,
+                                expires_in_days,
+                                needs_renewal: expires_in_days < 14,
+                                parent: Some(ca_domain.to_string()),
+                                sans: parse_san_from_cert(&cert),
+                                serial: String::new(),
+                                key_algorithm: None,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Fallback: walk directories and match by issuer CN or path
     for entry in WalkDir::new(context)
         .follow_links(true)
         .into_iter()
@@ -1799,18 +1844,28 @@ pub fn find_tls_certs_signed_by(context: &Path, ca_domain: &str) -> Result<Vec<C
             && path.file_name().and_then(|n| n.to_str()) == Some("crt.pem")
             && path.to_string_lossy().contains("certificates.d")
         {
-            // Check if this cert is signed by the given CA
+            let domain = path
+                .parent()
+                .and_then(|p| p.file_name())
+                .and_then(|n| n.to_str())
+                .unwrap_or("unknown")
+                .to_string();
+
+            if found_domains.contains(&domain) {
+                continue;
+            }
+
             if let Ok(pem) = fs::read(path) {
                 if let Ok(cert) = X509::from_pem(&pem) {
-                    let issuer = get_cn_from_name(cert.issuer_name());
-                    if issuer == ca_domain {
-                        let domain = path
-                            .parent()
-                            .and_then(|p| p.file_name())
-                            .and_then(|n| n.to_str())
-                            .unwrap_or("unknown")
-                            .to_string();
+                    let issuer_cn = get_cn_from_name(cert.issuer_name());
+                    let path_str = path.to_string_lossy();
+                    let is_under_ca = path_str.contains(&format!("/{}/certificates.d/", ca_domain))
+                        || path_str.contains(&format!(
+                            "/{}/intermediates.d/{}/certificates.d/",
+                            ca_domain, ca_domain
+                        ));
 
+                    if issuer_cn == ca_domain || is_under_ca {
                         let subject = cert
                             .subject_name()
                             .entries()
@@ -1829,11 +1884,11 @@ pub fn find_tls_certs_signed_by(context: &Path, ca_domain: &str) -> Result<Vec<C
                         let not_after = cert.not_after().to_string();
                         let expires_in_days = calculate_days_until_expiry(&not_after);
 
-                        let cert_info = CertificateInfo {
+                        certs.push(CertificateInfo {
                             path: path.to_path_buf(),
                             domain,
                             cert_type: CertificateType::Tls,
-                            issuer: issuer.clone(),
+                            issuer: issuer_cn,
                             subject,
                             not_before,
                             not_after,
@@ -1843,8 +1898,7 @@ pub fn find_tls_certs_signed_by(context: &Path, ca_domain: &str) -> Result<Vec<C
                             sans: parse_san_from_cert(&cert),
                             serial: String::new(),
                             key_algorithm: None,
-                        };
-                        certs.push(cert_info);
+                        });
                     }
                 }
             }
@@ -2242,12 +2296,8 @@ impl FixResult {
     }
 }
 
-/// Ask user for confirmation, returning true if confirmed
-fn ask_confirm(prompt: &str, yes: bool) -> bool {
-    if yes {
-        return true;
-    }
-
+/// Ask user for confirmation from a reader, returning true if confirmed
+fn ask_confirm_from_reader(prompt: &str, reader: &mut dyn io::BufRead) -> bool {
     print!("{}", prompt);
     if let Err(e) = std::io::stdout().flush() {
         tracing::error!("Failed to flush stdout: {}", e);
@@ -2255,12 +2305,23 @@ fn ask_confirm(prompt: &str, yes: bool) -> bool {
     }
 
     let mut input = String::new();
-    if let Err(e) = std::io::stdin().read_line(&mut input) {
+    if let Err(e) = reader.read_line(&mut input) {
         tracing::error!("Failed to read input: {}", e);
         return false;
     }
 
     input.trim().to_lowercase() == "y" || input.trim().to_lowercase() == "yes"
+}
+
+/// Ask user for confirmation, returning true if confirmed
+fn ask_confirm(prompt: &str, yes: bool) -> bool {
+    if yes {
+        return true;
+    }
+
+    let stdin = std::io::stdin();
+    let mut reader = stdin.lock();
+    ask_confirm_from_reader(prompt, &mut reader)
 }
 
 /// Re-sign a TLS certificate with a new random serial, preserving the existing key.
@@ -3611,6 +3672,25 @@ pub fn init_git_repo(context: &Path) -> Result<()> {
             return Ok(());
         }
     }
+
+    // Configure local git identity if not set (needed for CI environments)
+    let _ = std::process::Command::new("git")
+        .args(["config", "user.email"])
+        .current_dir(context)
+        .output()
+        .and_then(|out| {
+            if !out.status.success() || out.stdout.is_empty() {
+                std::process::Command::new("git")
+                    .args(["config", "user.email", "certboy@localhost"])
+                    .current_dir(context)
+                    .output()?;
+                std::process::Command::new("git")
+                    .args(["config", "user.name", "certboy"])
+                    .current_dir(context)
+                    .output()?;
+            }
+            Ok(out)
+        });
 
     // Create .gitignore to exclude private keys
     let gitignore_content = r#"# Private keys - NEVER commit these
@@ -6080,5 +6160,556 @@ DNS.3=foo.bar.com
         assert!(!result.fixed);
         assert!(result.skipped);
         assert_eq!(result.domain, "test.com");
+    }
+
+    #[test]
+    fn test_ask_confirm_from_reader_yes() {
+        let mut input = std::io::Cursor::new(b"yes\n");
+        assert!(ask_confirm_from_reader("Confirm? ", &mut input));
+    }
+
+    #[test]
+    fn test_ask_confirm_from_reader_y() {
+        let mut input = std::io::Cursor::new(b"y\n");
+        assert!(ask_confirm_from_reader("Confirm? ", &mut input));
+    }
+
+    #[test]
+    fn test_ask_confirm_from_reader_no() {
+        let mut input = std::io::Cursor::new(b"no\n");
+        assert!(!ask_confirm_from_reader("Confirm? ", &mut input));
+    }
+
+    #[test]
+    fn test_ask_confirm_from_reader_empty() {
+        let mut input = std::io::Cursor::new(b"\n");
+        assert!(!ask_confirm_from_reader("Confirm? ", &mut input));
+    }
+
+    #[test]
+    fn test_ask_confirm_from_reader_yes_uppercase() {
+        let mut input = std::io::Cursor::new(b"YES\n");
+        assert!(ask_confirm_from_reader("Confirm? ", &mut input));
+    }
+
+    #[test]
+    fn test_ask_confirm_from_reader_eof() {
+        let mut input = std::io::Cursor::new(b"");
+        assert!(!ask_confirm_from_reader("Confirm? ", &mut input));
+    }
+
+    #[test]
+    fn test_ask_confirm_yes_flag() {
+        assert!(ask_confirm("Confirm? ", true));
+    }
+
+    #[test]
+    fn test_display_certificate_node_with_remote_dns_resolved() {
+        let cert = CertificateInfo {
+            path: PathBuf::from("/test/root.com/certificates.d/server.com/crt.pem"),
+            domain: "server.com".to_string(),
+            cert_type: CertificateType::Tls,
+            issuer: "root.com".to_string(),
+            subject: "CN=server.com".to_string(),
+            not_before: "Jan  1 00:00:00 2024 GMT".to_string(),
+            not_after: "Jan  1 00:00:00 2034 GMT".to_string(),
+            expires_in_days: 3000,
+            needs_renewal: false,
+            parent: Some("root.com".to_string()),
+            sans: vec!["server.com".to_string(), "www.server.com".to_string()],
+            serial: "ABCDEF".to_string(),
+            key_algorithm: Some(KeyAlgorithm::EcdsaP256),
+        };
+
+        let remote = RemoteCheckResult {
+            dns_resolved: true,
+            resolved_ips: vec!["1.2.3.4".to_string(), "5.6.7.8".to_string()],
+            dns_error: None,
+            connectivity_success: true,
+            connectivity_error: None,
+            remote_cert: Some(RemoteCertInfo {
+                serial: "ABCDEF".to_string(),
+            }),
+            cert_error: None,
+            matches_local: true,
+            local_serial: Some("ABCDEF".to_string()),
+        };
+
+        let options = DisplayOptions {
+            expiration_alert_days: 14,
+            detail: true,
+            verify_openssl: false,
+            remote_checks: std::collections::HashMap::new(),
+        };
+
+        display_certificate_node(&cert, &[], true, false, &options, Some(&remote));
+    }
+
+    #[test]
+    fn test_display_certificate_node_with_remote_dns_failed() {
+        let cert = CertificateInfo {
+            path: PathBuf::from("/test/root.com/certificates.d/server.com/crt.pem"),
+            domain: "server.com".to_string(),
+            cert_type: CertificateType::Tls,
+            issuer: "root.com".to_string(),
+            subject: "CN=server.com".to_string(),
+            not_before: "Jan  1 00:00:00 2024 GMT".to_string(),
+            not_after: "Jan  1 00:00:00 2034 GMT".to_string(),
+            expires_in_days: 3000,
+            needs_renewal: false,
+            parent: Some("root.com".to_string()),
+            sans: vec![],
+            serial: "123".to_string(),
+            key_algorithm: None,
+        };
+
+        let remote = RemoteCheckResult {
+            dns_resolved: false,
+            resolved_ips: vec![],
+            dns_error: Some("NXDOMAIN".to_string()),
+            connectivity_success: false,
+            connectivity_error: None,
+            remote_cert: None,
+            cert_error: None,
+            matches_local: false,
+            local_serial: None,
+        };
+
+        let options = DisplayOptions {
+            expiration_alert_days: 14,
+            detail: false,
+            verify_openssl: false,
+            remote_checks: std::collections::HashMap::new(),
+        };
+
+        display_certificate_node(&cert, &[], true, false, &options, Some(&remote));
+    }
+
+    #[test]
+    fn test_display_certificate_node_with_remote_connectivity_failed() {
+        let cert = CertificateInfo {
+            path: PathBuf::from("/test/root.com/certificates.d/server.com/crt.pem"),
+            domain: "server.com".to_string(),
+            cert_type: CertificateType::Tls,
+            issuer: "root.com".to_string(),
+            subject: "CN=server.com".to_string(),
+            not_before: "Jan  1 00:00:00 2024 GMT".to_string(),
+            not_after: "Jan  1 00:00:00 2034 GMT".to_string(),
+            expires_in_days: 3000,
+            needs_renewal: false,
+            parent: Some("root.com".to_string()),
+            sans: vec![],
+            serial: "123".to_string(),
+            key_algorithm: None,
+        };
+
+        let remote = RemoteCheckResult {
+            dns_resolved: true,
+            resolved_ips: vec!["10.0.0.1".to_string()],
+            dns_error: None,
+            connectivity_success: false,
+            connectivity_error: Some("Connection refused".to_string()),
+            remote_cert: None,
+            cert_error: None,
+            matches_local: false,
+            local_serial: None,
+        };
+
+        let options = DisplayOptions {
+            expiration_alert_days: 14,
+            detail: false,
+            verify_openssl: false,
+            remote_checks: std::collections::HashMap::new(),
+        };
+
+        display_certificate_node(&cert, &[], true, false, &options, Some(&remote));
+    }
+
+    #[test]
+    fn test_display_certificate_node_with_remote_cert_mismatch() {
+        let cert = CertificateInfo {
+            path: PathBuf::from("/test/root.com/certificates.d/server.com/crt.pem"),
+            domain: "server.com".to_string(),
+            cert_type: CertificateType::Tls,
+            issuer: "root.com".to_string(),
+            subject: "CN=server.com".to_string(),
+            not_before: "Jan  1 00:00:00 2024 GMT".to_string(),
+            not_after: "Jan  1 00:00:00 2034 GMT".to_string(),
+            expires_in_days: 3000,
+            needs_renewal: false,
+            parent: Some("root.com".to_string()),
+            sans: vec![],
+            serial: "AAA".to_string(),
+            key_algorithm: None,
+        };
+
+        let remote = RemoteCheckResult {
+            dns_resolved: true,
+            resolved_ips: vec!["10.0.0.1".to_string()],
+            dns_error: None,
+            connectivity_success: true,
+            connectivity_error: None,
+            remote_cert: Some(RemoteCertInfo {
+                serial: "BBB".to_string(),
+            }),
+            cert_error: None,
+            matches_local: false,
+            local_serial: Some("AAA".to_string()),
+        };
+
+        let options = DisplayOptions {
+            expiration_alert_days: 14,
+            detail: false,
+            verify_openssl: false,
+            remote_checks: std::collections::HashMap::new(),
+        };
+
+        display_certificate_node(&cert, &[], true, false, &options, Some(&remote));
+    }
+
+    #[test]
+    fn test_display_certificate_node_with_remote_cert_error() {
+        let cert = CertificateInfo {
+            path: PathBuf::from("/test/root.com/certificates.d/server.com/crt.pem"),
+            domain: "server.com".to_string(),
+            cert_type: CertificateType::Tls,
+            issuer: "root.com".to_string(),
+            subject: "CN=server.com".to_string(),
+            not_before: "Jan  1 00:00:00 2024 GMT".to_string(),
+            not_after: "Jan  1 00:00:00 2034 GMT".to_string(),
+            expires_in_days: 3000,
+            needs_renewal: false,
+            parent: Some("root.com".to_string()),
+            sans: vec![],
+            serial: "AAA".to_string(),
+            key_algorithm: None,
+        };
+
+        let remote = RemoteCheckResult {
+            dns_resolved: true,
+            resolved_ips: vec!["10.0.0.1".to_string()],
+            dns_error: None,
+            connectivity_success: true,
+            connectivity_error: None,
+            remote_cert: None,
+            cert_error: Some("SSL handshake failed".to_string()),
+            matches_local: false,
+            local_serial: None,
+        };
+
+        let options = DisplayOptions {
+            expiration_alert_days: 14,
+            detail: false,
+            verify_openssl: false,
+            remote_checks: std::collections::HashMap::new(),
+        };
+
+        display_certificate_node(&cert, &[], true, false, &options, Some(&remote));
+    }
+
+    #[test]
+    fn test_display_certificate_node_serial_zero() {
+        let cert = CertificateInfo {
+            path: PathBuf::from("/test/root.com/crt.pem"),
+            domain: "root.com".to_string(),
+            cert_type: CertificateType::RootCa,
+            issuer: "root.com".to_string(),
+            subject: "CN=root.com".to_string(),
+            not_before: "Jan  1 00:00:00 2024 GMT".to_string(),
+            not_after: "Jan  1 00:00:00 2034 GMT".to_string(),
+            expires_in_days: 3000,
+            needs_renewal: false,
+            parent: None,
+            sans: vec![],
+            serial: "0".to_string(),
+            key_algorithm: Some(KeyAlgorithm::Rsa),
+        };
+
+        let options = DisplayOptions {
+            expiration_alert_days: 14,
+            detail: false,
+            verify_openssl: false,
+            remote_checks: std::collections::HashMap::new(),
+        };
+
+        display_certificate_node(&cert, &[], true, true, &options, None);
+    }
+
+    #[test]
+    fn test_display_certificate_node_expiring_soon() {
+        let cert = CertificateInfo {
+            path: PathBuf::from("/test/root.com/certificates.d/soon.com/crt.pem"),
+            domain: "soon.com".to_string(),
+            cert_type: CertificateType::Tls,
+            issuer: "root.com".to_string(),
+            subject: "CN=soon.com".to_string(),
+            not_before: "Jan  1 00:00:00 2024 GMT".to_string(),
+            not_after: "Feb  1 00:00:00 2024 GMT".to_string(),
+            expires_in_days: 5,
+            needs_renewal: true,
+            parent: Some("root.com".to_string()),
+            sans: vec!["soon.com".to_string()],
+            serial: "42".to_string(),
+            key_algorithm: None,
+        };
+
+        let options = DisplayOptions {
+            expiration_alert_days: 14,
+            detail: true,
+            verify_openssl: false,
+            remote_checks: std::collections::HashMap::new(),
+        };
+
+        display_certificate_node(&cert, &[false, true], false, false, &options, None);
+    }
+
+    #[test]
+    fn test_display_certificate_node_medium_expiry() {
+        let cert = CertificateInfo {
+            path: PathBuf::from("/test/root.com/certificates.d/medium.com/crt.pem"),
+            domain: "medium.com".to_string(),
+            cert_type: CertificateType::Tls,
+            issuer: "root.com".to_string(),
+            subject: "CN=medium.com".to_string(),
+            not_before: "Jan  1 00:00:00 2024 GMT".to_string(),
+            not_after: "Jun  1 00:00:00 2024 GMT".to_string(),
+            expires_in_days: 60,
+            needs_renewal: false,
+            parent: Some("root.com".to_string()),
+            sans: vec![],
+            serial: "FF".to_string(),
+            key_algorithm: None,
+        };
+
+        let options = DisplayOptions {
+            expiration_alert_days: 14,
+            detail: false,
+            verify_openssl: false,
+            remote_checks: std::collections::HashMap::new(),
+        };
+
+        display_certificate_node(&cert, &[], true, false, &options, None);
+    }
+
+    #[test]
+    fn test_display_certificate_tree_with_remote_checks() {
+        let certs = vec![
+            CertificateInfo {
+                path: PathBuf::from("/test/root.com/crt.pem"),
+                domain: "root.com".to_string(),
+                cert_type: CertificateType::RootCa,
+                issuer: "root.com".to_string(),
+                subject: "CN=root.com".to_string(),
+                not_before: "Jan  1 00:00:00 2024 GMT".to_string(),
+                not_after: "Jan  1 00:00:00 2034 GMT".to_string(),
+                expires_in_days: 3650,
+                needs_renewal: false,
+                parent: None,
+                sans: vec![],
+                serial: "01".to_string(),
+                key_algorithm: Some(KeyAlgorithm::EcdsaP256),
+            },
+            CertificateInfo {
+                path: PathBuf::from("/test/root.com/certificates.d/server.com/crt.pem"),
+                domain: "server.com".to_string(),
+                cert_type: CertificateType::Tls,
+                issuer: "root.com".to_string(),
+                subject: "CN=server.com".to_string(),
+                not_before: "Jan  1 00:00:00 2024 GMT".to_string(),
+                not_after: "Jan  1 00:00:00 2034 GMT".to_string(),
+                expires_in_days: 3650,
+                needs_renewal: false,
+                parent: Some("root.com".to_string()),
+                sans: vec!["server.com".to_string()],
+                serial: "02".to_string(),
+                key_algorithm: None,
+            },
+        ];
+
+        let mut remote_checks = std::collections::HashMap::new();
+        remote_checks.insert(
+            "server.com".to_string(),
+            RemoteCheckResult {
+                dns_resolved: true,
+                resolved_ips: vec!["1.2.3.4".to_string()],
+                dns_error: None,
+                connectivity_success: true,
+                connectivity_error: None,
+                remote_cert: Some(RemoteCertInfo {
+                    serial: "02".to_string(),
+                }),
+                cert_error: None,
+                matches_local: true,
+                local_serial: Some("02".to_string()),
+            },
+        );
+
+        let options = DisplayOptions {
+            expiration_alert_days: 14,
+            detail: true,
+            verify_openssl: false,
+            remote_checks,
+        };
+
+        let result = display_certificate_tree(&certs, &options);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_display_certificate_tree_duplicate_serials() {
+        let certs = vec![
+            CertificateInfo {
+                path: PathBuf::from("/test/root.com/crt.pem"),
+                domain: "root.com".to_string(),
+                cert_type: CertificateType::RootCa,
+                issuer: "root.com".to_string(),
+                subject: "CN=root.com".to_string(),
+                not_before: "Jan  1 00:00:00 2024 GMT".to_string(),
+                not_after: "Jan  1 00:00:00 2034 GMT".to_string(),
+                expires_in_days: 3650,
+                needs_renewal: false,
+                parent: None,
+                sans: vec![],
+                serial: "DEADBEEF".to_string(),
+                key_algorithm: None,
+            },
+            CertificateInfo {
+                path: PathBuf::from("/test/root.com/certificates.d/a.com/crt.pem"),
+                domain: "a.com".to_string(),
+                cert_type: CertificateType::Tls,
+                issuer: "root.com".to_string(),
+                subject: "CN=a.com".to_string(),
+                not_before: "Jan  1 00:00:00 2024 GMT".to_string(),
+                not_after: "Jan  1 00:00:00 2034 GMT".to_string(),
+                expires_in_days: 3650,
+                needs_renewal: false,
+                parent: Some("root.com".to_string()),
+                sans: vec![],
+                serial: "DEADBEEF".to_string(),
+                key_algorithm: None,
+            },
+        ];
+
+        let options = DisplayOptions {
+            expiration_alert_days: 14,
+            detail: false,
+            verify_openssl: false,
+            remote_checks: std::collections::HashMap::new(),
+        };
+
+        let result = display_certificate_tree(&certs, &options);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_key_algorithm_display() {
+        assert_eq!(KeyAlgorithm::Rsa.to_string(), "rsa");
+        assert_eq!(KeyAlgorithm::EcdsaP256.to_string(), "ecdsa-p256");
+    }
+
+    #[test]
+    fn test_shorten_path_home_prefix() {
+        if let Some(home) = dirs::home_dir() {
+            let test_path = home.join("test").join("cert.pem");
+            let shortened = shorten_path(&test_path);
+            assert!(shortened.starts_with('~'));
+        }
+    }
+
+    #[test]
+    fn test_shorten_path_absolute() {
+        let path = PathBuf::from("/tmp/random/path");
+        let shortened = shorten_path(&path);
+        assert_eq!(shortened, "/tmp/random/path");
+    }
+
+    #[test]
+    fn test_asn1time_to_local_string_valid() {
+        let result = asn1time_to_local_string("Mar  8 06:21:27 2036 GMT");
+        assert!(!result.is_empty());
+        assert!(result.contains("2036"));
+    }
+
+    #[test]
+    fn test_asn1time_to_local_string_invalid() {
+        let result = asn1time_to_local_string("invalid date");
+        assert_eq!(result, "invalid date");
+    }
+
+    #[test]
+    fn test_serial_exists_empty_dir() {
+        let temp_dir = TempDir::new().unwrap();
+        let result = serial_exists_in_context(temp_dir.path(), &[1, 2, 3, 4]);
+        assert!(result.is_ok());
+        assert!(!result.unwrap());
+    }
+
+    #[test]
+    fn test_serial_exists_no_match() {
+        let temp_dir = TempDir::new().unwrap();
+        let context = temp_dir.path();
+
+        let (cert_pem, _) = create_test_cert("test", 365);
+        let cert_dir = context.join("test.com");
+        fs::create_dir_all(&cert_dir).unwrap();
+        fs::write(cert_dir.join("crt.pem"), &cert_pem).unwrap();
+
+        // Use a random serial that won't match
+        let result = serial_exists_in_context(context, &[0xFF, 0xFE, 0xFD, 0xFC]);
+        assert!(result.is_ok());
+        assert!(!result.unwrap());
+    }
+
+    #[test]
+    fn test_is_ca_certificate() {
+        let (cert_pem, _) = create_test_cert("Test CA", 365);
+        let cert = X509::from_pem(&cert_pem).unwrap();
+        assert!(is_ca_certificate(&cert));
+    }
+
+    #[test]
+    fn test_detect_key_algorithm_rsa() {
+        let (cert_pem, _) = create_test_cert("test", 365);
+        let cert = X509::from_pem(&cert_pem).unwrap();
+        let algo = detect_key_algorithm_from_x509(&cert);
+        assert_eq!(algo, Some(KeyAlgorithm::Rsa));
+    }
+
+    #[test]
+    fn test_tls_cert_path_found() {
+        let temp_dir = TempDir::new().unwrap();
+        let context = temp_dir.path();
+
+        let root_dir = context.join("root.com");
+        fs::create_dir_all(&root_dir).unwrap();
+
+        let cert_dir = root_dir.join("certificates.d").join("server.com");
+        fs::create_dir_all(&cert_dir).unwrap();
+        fs::write(cert_dir.join("crt.pem"), "dummy").unwrap();
+
+        let result = find_tls_cert_path(context, "server.com");
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_tls_cert_path_under_ica() {
+        let temp_dir = TempDir::new().unwrap();
+        let context = temp_dir.path();
+
+        let root_dir = context.join("root.com");
+        let ica_dir = root_dir.join("intermediates.d").join("ica.com");
+        let cert_dir = ica_dir.join("certificates.d").join("server.com");
+        fs::create_dir_all(&cert_dir).unwrap();
+        fs::write(cert_dir.join("crt.pem"), "dummy").unwrap();
+
+        let result = find_tls_cert_path(context, "server.com");
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_tls_cert_path_missing() {
+        let temp_dir = TempDir::new().unwrap();
+        let result = find_tls_cert_path(temp_dir.path(), "nonexistent.com");
+        assert!(result.is_none());
     }
 }
